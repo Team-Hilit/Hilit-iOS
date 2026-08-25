@@ -125,6 +125,8 @@ struct FeatureMyPageExampleApp: App {
             jobType: "IOS",
             jobTypeLabel: "iOS",
             careerYears: 2,
+            // 마이페이지 접힘 제목은 직군·연차 조합이라 서버 title 은 비워 둔다(홈만 쓴다 — 8ebc7c8).
+            title: nil,
             interviewedAt: Date(timeIntervalSince1970: 1_783_728_000 - TimeInterval(sessionId) * 86_400),
             portfolioFileName: "홍길동 자기소개서_SK프롭티어 기업 면접.pdf",
             portfolioDeleted: portfolioDeleted,

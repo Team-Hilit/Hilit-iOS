@@ -117,11 +117,16 @@ public struct InterviewFeature {
                 guard case let .readiness(readiness) = state.screen,
                       case let .ready(summaryQuestion) = readiness.questionPrep
                 else { return .none }
-                // 진행 중 보관은 **여기서** 시작한다(2026-08-18) — 이 값의 존재가 홈의 «진행 중» 판정
-                // 재료라, 위저드 완주 시점에 심으면 시작하기를 누르지 않고 나간 사용자에게도 카드가 떴다.
-                // 0초·표식 없음으로 여는 건 여기까지다 — 표식은 세션 화면이 녹화를 열 때 찍고,
-                // 누적초는 백그라운드 마감마다 갱신한다([[interview#세션]] 동결 경로).
-                heldSessionStore.save(HeldSession(sessionId: state.sessionId, recordedSeconds: 0))
+                // 장부는 이미 온보딩 완주 때 열렸다(2026-08-21) — 여기서 하는 일은 **«시작했다» 로
+                // 올리는 것**뿐이다. 이 플래그가 서면 비로소 홈이 «진행 중» 카드를 그린다.
+                // 표식은 세션 화면이 녹화를 열 때 찍고, 누적초는 백그라운드 마감마다 갱신한다
+                // ([[interview#세션]] 동결 경로).
+                //
+                // 장부가 없으면(비정상 — 재개 진입은 준비 화면을 건너뛴다) 새로 연다: 시작한 세션이
+                // 장부에 없는 채로 두면 회수도 재개도 못 하는 고아가 된다.
+                var held = heldSessionStore.load() ?? HeldSession(sessionId: state.sessionId, recordedSeconds: 0)
+                held.hasStarted = true
+                heldSessionStore.save(held)
                 state.screen = .session(InterviewSessionFeature.State(
                     sessionId: state.sessionId,
                     summaryQuestion: summaryQuestion,

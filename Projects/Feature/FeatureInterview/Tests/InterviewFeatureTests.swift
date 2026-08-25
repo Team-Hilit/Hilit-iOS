@@ -126,10 +126,17 @@ struct InterviewFeatureTests {
         await store.finish()
     }
 
-    @Test("면접 시작 전환은 요약 질문·프리뷰 핸들을 세션에 시드하고 진행 중 보관을 시작한다")
+    @Test("면접 시작 전환은 요약 질문·프리뷰 핸들을 세션에 시드하고 장부를 «시작됨» 으로 올린다")
     func startRequestedSeedsSummaryQuestionAndPreviewHandle() async {
         let handle = CameraPreviewHandle(session: AVCaptureSession())
-        let held = LockIsolated<HeldSession?>(nil)
+        // 온보딩 완주가 이미 열어 둔 장부 — 시작 전이라 hasStarted false, 표식은 찍혀 있다.
+        let opened = HeldSession(
+            sessionId: 1,
+            recordedSeconds: 0,
+            hasStarted: false,
+            processToken: HeldSession.currentProcessToken
+        )
+        let held = LockIsolated<HeldSession?>(opened)
         var readiness = InterviewReadinessFeature.State(sessionId: 1)
         readiness.previewHandle = handle
         readiness.questionPrep = .ready(.fixture)
@@ -138,6 +145,7 @@ struct InterviewFeatureTests {
         let store = TestStore(initialState: initialState) {
             InterviewFeature()
         } withDependencies: {
+            $0.heldSessionStore.load = { held.value }
             $0.heldSessionStore.save = { held.setValue($0) }
         }
 
@@ -148,8 +156,39 @@ struct InterviewFeatureTests {
                 previewHandle: handle
             ))
         }
-        // 0초·표식 없음 — 표식은 세션 화면이 녹화를 열 때 찍는다(프로세스를 넘어 재개해도 잃을 게 없다).
-        #expect(held.value == HeldSession(sessionId: 1, recordedSeconds: 0))
+        // 플래그만 오른다 — 표식·누적초는 장부에 있던 값 그대로다(덮어쓰면 회수 판정이 흔들린다).
+        #expect(held.value == HeldSession(
+            sessionId: 1,
+            recordedSeconds: 0,
+            hasStarted: true,
+            processToken: HeldSession.currentProcessToken
+        ))
+    }
+
+    @Test("장부가 비어 있으면 시작 전환이 새로 연다 — 시작한 세션이 장부 밖에 남으면 회수 불가다")
+    func startRequestedOpensLedgerWhenMissing() async {
+        let handle = CameraPreviewHandle(session: AVCaptureSession())
+        let held = LockIsolated<HeldSession?>(nil)
+        var readiness = InterviewReadinessFeature.State(sessionId: 9)
+        readiness.previewHandle = handle
+        readiness.questionPrep = .ready(.fixture)
+        var initialState = InterviewFeature.State(sessionId: 9)
+        initialState.screen = .readiness(readiness)
+        let store = TestStore(initialState: initialState) {
+            InterviewFeature()
+        } withDependencies: {
+            $0.heldSessionStore.load = { held.value }
+            $0.heldSessionStore.save = { held.setValue($0) }
+        }
+
+        await store.send(.screen(.readiness(.delegate(.startRequested)))) {
+            $0.screen = .session(InterviewSessionFeature.State(
+                sessionId: 9,
+                summaryQuestion: .fixture,
+                previewHandle: handle
+            ))
+        }
+        #expect(held.value == HeldSession(sessionId: 9, recordedSeconds: 0, hasStarted: true))
     }
 
     @Test("질문 준비 실패는 questionPrep 실패 화면으로 전환한다")

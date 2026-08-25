@@ -50,6 +50,8 @@ struct MyPageEntryTests {
         jobType: "BACKEND",
         jobTypeLabel: "백엔드 개발자",
         careerYears: 3,
+        // 마이페이지 접힘 제목은 서버 title 이 아니라 직군·연차 조합이다(홈만 title 을 쓴다 — 8ebc7c8).
+        title: nil,
         interviewedAt: Date(timeIntervalSince1970: 1_783_728_000),
         portfolioFileName: "portfolio.pdf",
         portfolioDeleted: false,
