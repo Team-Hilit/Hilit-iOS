@@ -240,6 +240,31 @@ struct HomeHeldSessionTests {
         #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 4))
     }
 
+    // 2026-08-21 제품 결정 — 세션은 온보딩 분석이 끝난 순간 서버에 생기고 이용권도 그때 잡힌다.
+    // [시작하기] 를 누르지 않았어도 카드를 그려야 사용자가 그 이용권을 회수한다(#130 이 숨겼던 자리).
+    @Test("시작 전 장부도 카드가 된다 — 잡힌 이용권의 회수 동선이 그것뿐이다")
+    func unstartedHeldBecomesCard() async {
+        let held = HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: false, processToken: nil)
+        let store = Self.store(held: held, remaining: 0)
+
+        await store.send(.view(.onAppear))
+        // 잔여 0 이어도 소진이 아니다 — 진행 중 세션이 그 이용권을 잡고 있다.
+        #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 4))
+        await store.receive(\.inner.entryLoaded)
+        #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 4))
+    }
+
+    @Test("죽은 프로세스의 진행분 보관값도 카드가 되지 않는다 — 킬 클린업이 주울 몫이다")
+    func deadProcessHeldDoesNotBecomeCard() async {
+        let held = HeldSession(sessionId: 1, recordedSeconds: 320, hasStarted: true, processToken: UUID())
+        let store = Self.store(held: held, remaining: 3)
+
+        await store.send(.view(.onAppear))
+        #expect(store.state.startInterview.variant == .first)
+        await store.receive(\.inner.entryLoaded)
+        #expect(store.state.startInterview.variant == .first)
+    }
+
     @Test("현재 프로세스의 진행분 보관값은 환산된 남은 질문 수로 카드가 된다")
     func inProcessHeldShowsConvertedCount() async {
         let held = HeldSession(

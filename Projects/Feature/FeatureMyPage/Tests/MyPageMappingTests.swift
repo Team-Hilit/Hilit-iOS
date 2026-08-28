@@ -30,7 +30,7 @@ struct MyPageMappingTests {
             jobType: "BACKEND",
             jobTypeLabel: jobTypeLabel,
             careerYears: careerYears,
-            // 마이페이지 행 제목은 «직군 · N년차 면접» 스냅샷에서 만든다 — 이 필드는 안 쓴다.
+            // 마이페이지 접힘 제목은 직군·연차 조합이라 서버 title 은 비워 둔다(홈만 쓴다 — 8ebc7c8).
             title: nil,
             interviewedAt: Self.interviewedAt,
             portfolioFileName: portfolioFileName,

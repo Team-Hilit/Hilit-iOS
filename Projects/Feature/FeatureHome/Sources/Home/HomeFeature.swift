@@ -322,11 +322,20 @@ private extension HomeFeature {
     ///
     /// **잔여를 모르면(nil) 소진이 아니다** — 프로필이 죽었을 뿐인데 «무료 횟수를 모두 사용했어요»
     /// 를 띄우면 시작 경로가 [홈으로] 하나로 막힌다. 모를 땐 `first` 로 둔다.
+    ///
+    /// **[시작하기] 전이라도 카드를 그린다**(2026-08-21 제품 결정) — 세션은 온보딩 분석이 끝난 순간
+    /// 서버에 생기고 이용권도 그때 잡힌다. 시작 버튼을 누르지 않았다고 카드를 숨기면 잡힌 이용권을
+    /// 되찾을 길이 사라지고([이어서 진행]·[처음부터 시작] 이 그 유일한 동선이다), [시작하기] 는 세션을
+    /// 하나 더 만든다. #130 이 이걸 «유령 카드» 로 보고 숨겼던 것을 되돌린 자리다.
+    ///
+    /// 필터는 `isResumableInCurrentProcess` 하나 — 클린업이 이 술어의 **정확한 부정**을 쓴다
+    /// ([[interview#Client 계약]]). 시작 전 장부는 0초·표식 없음이라 여기서 참이고(잃을 영상이 없어
+    /// 프로세스를 넘어 살아남는다), 그래서 클린업도 건드리지 않는다 — 두 곳이 자동으로 맞물린다.
     static func startVariant(
         heldSession: HeldSession?,
         remainingChances: Int?
     ) -> StartInterviewFeature.Variant {
-        if let heldSession {
+        if let heldSession, heldSession.isResumableInCurrentProcess {
             return .inProgress(
                 remainingQuestionCount: remainingQuestionCount(recordedSeconds: heldSession.recordedSeconds)
             )

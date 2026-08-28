@@ -68,7 +68,9 @@ extension AppFeature {
                 // 세그먼트도 남긴다 — 세션이 살아 있으면 그게 재개 재료다.
                 return
             }
-            heldSessionStore.clear()
+            // 중단 왕복 사이에 장부가 다른 세션으로 바뀌었으면(완주·새 온보딩 완주) 남의 장부를 지우게
+            // 된다 — 확인과 삭제를 한 연산으로 묶고, 세그먼트 폐기도 그 뒤에 세운다.
+            guard heldSessionStore.clearIfHolding(sessionId) else { return }
             // 세션이 끝났으니 재개 재료(세그먼트)도 폐기 — `.interrupted` 만이 세그먼트를 보존하는 유일한
             // 이탈 경로다. purgeRecordings 는 원장이 그 세션을 아직 소유해 no-op 이라 discard 가 맞다(멱등·비던짐).
             await recordingClient.discardRecording()
@@ -79,26 +81,38 @@ extension AppFeature {
     /// [이어서 진행] — 서버에 살아 있는 세션으로 복귀. ① 재개 가능 조회 ② 재개 확정 ③ 면접 화면.
     /// ①·② 가 «끝난 세션» 을 내면 재개 재료가 아니므로 보관값을 지우고 홈을 다시 태워
     /// 변형을 갱신한다(진행 중 → 처음·소진).
+    ///
+    /// **시작 전 세션은 ② 를 건너뛰고 준비 화면으로 되돌린다**(2026-08-21) — 아직 질문이 오가지
+    /// 않아 확정할 «다음 턴» 이 없고, 사용자는 카메라 확인·가이드를 아직 보지 않았다.
     func resumeHeldSession(_ sessionId: Int) -> Effect<Action> {
         .run { [heldSessionStore, interviewClient, recordingClient] send in
             do {
                 let check = try await interviewClient.checkResume(sessionId)
+                // 대기 사이에 장부가 바뀌었을 수 있다(완주·중단이 지웠거나 새 세션이 저장됐거나) —
+                // 그러면 이 판정의 대상이 이미 없으니 아래 정리·라우팅을 **남의 값에 꽂지 않고** 멈춘다.
+                guard let held = heldSessionStore.load(matching: sessionId) else { return }
                 // ENDED — hold 만료 처리(세션 ABANDONED 전환·이용권 환불)는 서버가 이 호출
                 // 안에서 이미 끝냈다. 클라가 할 일은 보관값 삭제뿐이다.
                 // TODO(#69): status == .invalid 는 Interview_SttFailure 화면 — 복귀 라우팅
                 //            ([[interview#코디네이터]])엔 배선됐고, 홈 탭 경로의 화면 전환만 미도안.
                 guard check.isResumable else {
-                    heldSessionStore.clear()
+                    guard heldSessionStore.clearIfHolding(sessionId) else { return }
                     // 세션이 끝났으니 재개 재료(세그먼트)도 폐기 — `.interrupted` 만이 세그먼트를 보존하는 유일한
                     // 이탈 경로다. purgeRecordings 는 원장이 그 세션을 아직 소유해 no-op 이라 discard 가 맞다(멱등·비던짐).
                     await recordingClient.discardRecording()
                     return await send(.home(.view(.onAppear)))
                 }
+                // 시작 전 세션 — 살아 있다는 것만 확인하고 준비 화면으로 되돌린다.
+                if !held.hasStarted {
+                    return await send(.interviewReadinessResumeResolved(sessionId: sessionId))
+                }
                 // 재개가 hold 무효화와 레이스면 409 가 아니라 200 + sessionEnded 로 온다(서버 계약).
                 // 질문이 비어 오는 것도 «끝난 세션» 과 같게 다룬다 — 이어서 물을 게 없으면 재개가 아니다.
                 let resumed = try await interviewClient.confirmResume(sessionId)
+                // 두 번째 대기도 같은 이유로 다시 맞춘다 — 여기선 라우팅이 목적이라 읽기로 확인한다.
+                guard heldSessionStore.load(matching: sessionId) != nil else { return }
                 guard !resumed.sessionEnded, let question = resumed.nextQuestion else {
-                    heldSessionStore.clear()
+                    guard heldSessionStore.clearIfHolding(sessionId) else { return }
                     // 위와 같은 이유 — 끝난 세션의 세그먼트는 재개 재료가 아니다(discard 는 멱등·비던짐).
                     await recordingClient.discardRecording()
                     return await send(.home(.view(.onAppear)))
@@ -173,10 +187,12 @@ extension AppFeature {
             guard let held = heldSessionStore.load(), held.isResumableInCurrentProcess else { return }
             guard let check = try? await interviewClient.checkResume(held.sessionId), !check.isResumable
             else { return }
+            // 물어본 그 세션의 장부가 아직 그대로일 때만 걷는다 — 대기 사이에 새 세션이 저장됐으면
+            // 여기서 지우는 것이 그 새 장부이고, 버리는 세그먼트도 그쪽 것이다(#130 이 만든 고아와 같은 꼴).
             // 끝난 세션이니 재개 재료(세그먼트)도 폐기한다 — 홈 두 갈래의 ENDED 처리와 같은 규약이다.
             // 환불은 서버가 그 GET 안에서 끝냈다. INVALID 도 여기선 카드를 걷는 것까지다 —
             // 띄울 면접 흐름이 없어 STT 실패 화면은 홈 [이어서 진행] 경로에 남는다(#69 TODO).
-            heldSessionStore.clear()
+            guard heldSessionStore.clearIfHolding(held.sessionId) else { return }
             await recordingClient.discardRecording()
             await send(.home(.view(.onAppear)))
         }
@@ -202,7 +218,9 @@ extension AppFeature {
             } catch {
                 return
             }
-            heldSessionStore.clear()
+            // 정리를 시작한 그 장부일 때만 걷는다 — 서버 왕복 사이에 사용자가 새 면접을 시작했으면
+            // (온보딩 완주가 장부를 연다) 여기서 지우는 것이 살아 있는 세션의 장부다.
+            guard heldSessionStore.clearIfHolding(sessionId) else { return }
             await recordingClient.purgeRecordings(sessionId)
         }
     }
