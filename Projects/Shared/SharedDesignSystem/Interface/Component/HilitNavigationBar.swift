@@ -250,7 +250,10 @@ public extension View {
             PresentedNavigationBar(title: title, trailing: trailing, surface: surface, leading: leading, onClose: onClose)
                 .background {
                     if background == .filled {
+                        // 채움은 상태바 자리까지 끌어올린다 — `safeAreaInset` 은 세이프에어리어 **아래**에
+                        // 앉으므로 바 44 만 칠하면 그 위 상태바 띠로 스크롤 콘텐츠가 그대로 비친다.
                         surface.fillColor
+                            .ignoresSafeArea(edges: .top)
                     }
                 }
         }

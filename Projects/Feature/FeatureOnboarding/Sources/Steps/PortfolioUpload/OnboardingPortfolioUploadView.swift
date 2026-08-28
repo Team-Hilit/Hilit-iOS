@@ -92,7 +92,7 @@ public struct OnboardingPortfolioUploadView: View {
         Modal(
             "포트폴리오를 삭제하시겠어요?",
             subText: "포트폴리오 삭제 기회는 한 달에 한 번이에요.",
-            info: "이번달 남은 삭제 기회 1번"
+            info: "이번 달 남은 삭제 기회 1번"
         ) {
             ButtonLarge(.modal, tone: .twoColor) {
                 Button("아니요") { send(.userTappedDeleteCancel) }

@@ -153,7 +153,7 @@ private let previewCardWidth: CGFloat = 327
     Modal(
         "포트폴리오를\n새로 업로드할 수 없어요.",
         subText: "한 달에 한 번만 포트폴리오를 업로드할 수 있어요.",
-        info: "이번달 남은 기회 0번",
+        info: "이번 달 남은 기회 0번",
         infoStyle: .error
     ) {
         ButtonLarge(.modal, tone: .twoColor) {

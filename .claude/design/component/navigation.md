@@ -41,6 +41,8 @@ public var body: some View {
 
 present 경로가 push 와 다른 점 셋 — `allowsSwipeBack` 없음(스택 밖은 스와이프백 개념 자체가 없다) · 상태바 글자색은 화면 몫(다크 화면이면 `.preferredColorScheme(.dark)` 를 화면이 직접) · 좌우 여백이 시안값 px20(push 는 시스템 마진이라 수 pt 다르다 — «기본 UI 를 토대로» 결정에 따라 수용).
 
+present `.filled` 의 채움은 상태바 자리까지 올라간다(`ignoresSafeArea(edges: .top)`) — `safeAreaInset` 은 세이프에어리어 **아래**에 앉아서, 바 44 만 칠하면 그 위 띠로 스크롤 콘텐츠가 그대로 비친다(마이페이지 2026-08-27).
+
 배관 소유는 모디파이어다. push 는 타이틀 인라인·`navigationBarBackButtonHidden`·`toolbarBackground`·스와이프백 delegate 를, present 는 `safeAreaInset` 배치를 각각 감춘다. 슬롯 룩(아이콘 버튼·텍스트 버튼)은 `HilitNavigationBarSlot` 한 곳에서 공유하므로 스타일 변경은 거기만 고친다 — 두 경로가 갈라지지 않게 하는 지점.
 
 `navigationBarBackButtonHidden` 이 끄는 엣지 스와이프백은 `Interaction/UINavigationController+SwipeBack.swift` 의 `SwipeBackPolicy` 가 **화면이 보이는 동안만 delegate 를 점유하고 반환**해 되살린다(전역 패치 아님 — 시스템 피커 오염 방지). 스와이프 pop 은 리듀서에 `popFrom(id:)` 로 도착한다(`backRequested` 아님).

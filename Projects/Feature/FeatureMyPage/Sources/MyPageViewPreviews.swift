@@ -5,7 +5,7 @@
 //  Created by 서정원 on 26/08/01.
 //
 
-// Figma «[Part5] 마이페이지» 의 화면 6장을 상태별 캔버스로 되살린다 — 시안과 나란히 놓고 대조하는 용도.
+// Figma «[Part5] 마이페이지» 의 화면들을 상태별 캔버스로 되살린다 — 시안과 나란히 놓고 대조하는 용도.
 // 프로덕션 초기값은 중립값(빈 화면)이라, Default 탭만 previewValue 조회로 채우고
 // 나머지 탭은 파일 하단 private 픽스처로 State 를 직접 세운다.
 
@@ -43,9 +43,18 @@ import SwiftUI
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 
-#Preview("리포트 펼침") {
+#Preview("리포트 없음") {
+    // 시안 «MyPage_Report_empty» — 포폴·리포트 둘 다 비었고 «회원탈퇴» 가 바닥에 붙는다.
     var state = MyPageFeature.State.filled
-    state.expandedReportID = 1
+    state.portfolio = .empty
+    state.reports = []
+    return MyPageView(store: Store(initialState: state) { MyPageFeature() })
+}
+
+#Preview("리포트 펼침 — 복수") {
+    // 펼침은 한 줄로 제한되지 않는다 — 두 줄을 동시에 펼쳐 둔 모습.
+    var state = MyPageFeature.State.filled
+    state.expandedReportIDs = [1, 3]
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 

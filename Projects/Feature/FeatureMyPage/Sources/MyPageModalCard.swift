@@ -47,7 +47,7 @@ struct MyPageModalCard: View {
             Modal(
                 "포트폴리오를\n새로 업로드하시겠어요?",
                 subText: "한 달에 한 번만 포트폴리오를\n새로 업로드할 수 있어요.",
-                info: "이번달 남은 기회 \(remaining)번"
+                info: "이번 달 남은 기회 \(remaining)번"
             ) {
                 buttons(cancel: "취소", confirm: "업로드하기")
             }
@@ -56,7 +56,7 @@ struct MyPageModalCard: View {
             Modal(
                 "포트폴리오를\n새로 업로드할 수 없어요.",
                 subText: "한 달에 한 번만 포트폴리오를 업로드할 수 있어요.",
-                info: "이번달 남은 기회 \(remaining)번",
+                info: "이번 달 남은 기회 \(remaining)번",
                 infoStyle: .error
             ) {
                 buttons(cancel: "취소", confirm: "확인")

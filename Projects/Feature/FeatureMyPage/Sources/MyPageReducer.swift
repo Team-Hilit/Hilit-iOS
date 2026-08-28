@@ -19,7 +19,7 @@ extension MyPageFeature {
     /// upload 는 등록·폴링 한 줄기 — 새 파일을 고르거나 X(취소)를 누르면 앞 줄기를 접는다.
     enum CancelID { case entry, upload }
 
-    /// 업로드 상한 20MB — Figma «1개 파일, 최대 20Mb까지 가능합니다» · 서버 검증 FILE_TOO_LARGE.
+    /// 업로드 상한 20MB — Figma «최대 20MB, 30쪽 이내의 PDF 파일 1개만 가능합니다» · 서버 검증 FILE_TOO_LARGE.
     static let maxFileSizeBytes = 20 * 1024 * 1024
     /// 페이지 상한 30p — PRD S2 · 서버 검증 PAGE_COUNT_EXCEEDED. 클라 선검증(서버 실측 재검증).
     static let maxPageCount = 30
@@ -74,7 +74,12 @@ extension MyPageFeature {
             return reducePortfolio(&state, action)
 
         case let .userTappedReport(id):
-            state.expandedReportID = state.expandedReportID == id ? nil : id
+            // 재탭이면 그 행만 접는다 — 다른 행은 건드리지 않는다(여러 리포트를 펼쳐 두고 비교한다).
+            if state.expandedReportIDs.contains(id) {
+                state.expandedReportIDs.remove(id)
+            } else {
+                state.expandedReportIDs.insert(id)
+            }
             return .none
 
         case let .userTappedOpenReport(id):
@@ -252,6 +257,8 @@ extension MyPageFeature {
             state.replaceAvailable = list.replaceAvailable ?? true
             state.isInterviewInProgress = list.portfolios.first?.interviewInProgress ?? false
             state.reports = IdentifiedArray(uniqueElements: reports.compactMap(Report.init(summary:)))
+            // 재조회로 사라진 세션의 펼침만 버린다 — 남은 펼침은 그대로 둔다(깜빡임 방지, 홈과 같은 규칙).
+            state.expandedReportIDs.formIntersection(state.reports.ids)
             guard case let .uploading(file, _) = state.portfolio else {
                 // 업로드 아닌 판으로 확정 — 남은 접수 id 를 지운다(다음 취소가 남의 포폴을 지우면 안 된다).
                 state.uploadServerID = nil
