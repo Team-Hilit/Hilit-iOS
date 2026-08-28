@@ -21,21 +21,37 @@ public struct MyPageView: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                profileSection
-                // 프로필 아래는 통째로 g50 판이다 — 내용이 짧아도 바닥까지 회색이 이어지도록 스크롤 배경도 같은 색.
+        // 스크롤 판에 «보이는 높이» 를 최소값으로 물린다 — 내용이 짧으면 남는 자리를 Spacer 가 먹어
+        // «회원탈퇴» 가 화면 바닥에 붙고(MyPage_Report_empty), 길면 Spacer 가 0 이라 목록 바로 아래에 온다(MyPage_Main).
+        GeometryReader { proxy in
+            ScrollView {
                 VStack(spacing: 0) {
-                    portfolioSection
-                    reportSection
-                    withdrawButton
+                    MyPageProfileSection(
+                        profile: store.profile,
+                        onLogout: { send(.userTappedLogout) }
+                    )
+                    // 프로필 아래는 통째로 g50 판이다 — 내용이 짧아도 바닥까지 회색이 이어지도록 스크롤 배경도 같은 색.
+                    VStack(spacing: 0) {
+                        portfolioSection
+                        reportSection
+                        Spacer(minLength: 0)
+                        withdrawButton
+                    }
+                    .frame(maxWidth: .infinity)
+                    .background(Color.GrayScale.g50)
                 }
-                .frame(maxWidth: .infinity)
-                .background(Color.GrayScale.g50)
+                .frame(minHeight: proxy.size.height)
+                // 위로 당겨 바운스할 때 드러나는 자리 — 맨 위가 흰 프로필 판이라 그 위도 흰색이어야 한다.
+                // 스크롤 판 배경(g50)은 그대로 두므로 아래쪽 바운스는 회색으로 남는다(내용 바닥과 같은 색).
+                .background(alignment: .top) {
+                    Color.BlackWhite.white
+                        .frame(height: proxy.size.height)
+                        .offset(y: -proxy.size.height)
+                }
             }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
-        .background(Color.GrayScale.g50)
+        .background { Color.GrayScale.g50.ignoresSafeArea() }
         // 탭이 아니라 present 로 올라오는 한 장짜리 화면이다 (스택 밖 → presented 경로).
         .hilitPresentedNavigationBar(
             "마이페이지",
@@ -63,77 +79,6 @@ public struct MyPageView: View {
         .onAppear { send(.onAppear) }
     }
 
-    // MARK: - 프로필
-
-    /// 흰 판 위 두 카드 — 이름·티켓 카드와 계정 카드.
-    private var profileSection: some View {
-        VStack(spacing: .ds(.p8)) {
-            profileCard
-            accountCard
-        }
-        .padding(.horizontal, .ds(.p20))
-        .padding(.vertical, .ds(.p12))
-        .frame(maxWidth: .infinity)
-        .background(Color.BlackWhite.white)
-    }
-
-    private var profileCard: some View {
-        VStack(spacing: .ds(.p12)) {
-            HStack(alignment: .top, spacing: .ds(.p8)) {
-                VStack(alignment: .leading, spacing: .ds(.p4)) {
-                    Text(store.profile.name)
-                        .dsTypography(.body1)
-                        .foregroundStyle(Color.HilitBlack.b800)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    // 태그끼리 간격 0 — 각 태그가 이미 px12 를 갖는다(시안 x=0, x=38 이 맞닿아 있다).
-                    HStack(spacing: 0) {
-                        TagLabel(store.profile.jobGroup, style: .noneGray, size: .regular)
-                        TagLabel(store.profile.careerLevel, style: .noneGray, size: .regular)
-                    }
-                }
-            }
-            ticketRow
-        }
-        .padding(.horizontal, .ds(.p14))
-        .padding(.vertical, .ds(.p10))
-        .background(Color.BlackWhite.white)
-        .overlay { cardBorder }
-    }
-
-    private var ticketRow: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: .ds(.p4)) {
-                icon(Image.Coupon.default)
-                Text("남은 면접 기회")
-                    .dsTypography(.body6)
-                    .foregroundStyle(Color.GrayScale.g500)
-            }
-            Spacer(minLength: .ds(.p8))
-            TagLabel("\(store.profile.remainingTickets)회", style: .greenGreen)
-        }
-        .padding(.horizontal, .ds(.p14))
-        .padding(.vertical, .ds(.p8))
-        .background(Color.GrayScale.g50)
-    }
-
-    /// 소셜 계정 줄. 시안은 프레임마다 로그아웃 버튼 유무가 갈리는데(로그인 상태에서 늘 필요한 동선이라)
-    /// max 케이스(MyPage_Main)를 따라 항상 노출한다.
-    private var accountCard: some View {
-        HStack(spacing: .ds(.p12)) {
-            icon(store.profile.provider == "APPLE" ? Image.Logo.appleWithBg : Image.Logo.kakaoWithBg)
-            Text(store.profile.email)
-                .dsTypography(.body7)
-                .foregroundStyle(Color.GrayScale.g500)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button("로그아웃") { send(.userTappedLogout) }
-                .buttonStyle(.miniSub(.none))
-        }
-        .padding(.horizontal, .ds(.p14))
-        .padding(.vertical, .ds(.p10))
-        .background(Color.BlackWhite.white)
-        .overlay { cardBorder }
-    }
-
     // MARK: - 내 포트폴리오
 
     private var portfolioSection: some View {
@@ -154,7 +99,7 @@ public struct MyPageView: View {
                 Button {
                     send(.userTappedUploadPortfolio)
                 } label: {
-                    FileUpload(.before(title: "파일을 업로드해주세요", guidance: "1개 파일, 최대 20Mb까지 가능합니다"))
+                    FileUpload(.before())
                 }
                 .buttonStyle(.plain)
                 FileUpload(.empty(message: "아직 첨부된 포트폴리오가 없어요"))
@@ -225,10 +170,14 @@ public struct MyPageView: View {
     private var reportSection: some View {
         VStack(alignment: .leading, spacing: .ds(.p10)) {
             sectionHeader("내 면접 리포트")
-            // 줄끼리 간격 0 — 접힘 카드의 테두리가 서로 맞닿아 목록 선을 만든다(시안 그대로).
-            VStack(spacing: 0) {
-                ForEach(store.reports) { report in
-                    reportRow(report)
+            if store.reports.isEmpty {
+                FileUpload(.empty(message: "면접을 시작하고 리포트를 받아보세요!"))
+            } else {
+                // 줄끼리 간격 0 — 접힘 카드의 테두리가 서로 맞닿아 목록 선을 만든다(시안 그대로).
+                VStack(spacing: 0) {
+                    ForEach(store.reports) { report in
+                        reportRow(report)
+                    }
                 }
             }
         }
@@ -237,7 +186,7 @@ public struct MyPageView: View {
     }
 
     private func reportRow(_ report: MyPageFeature.Report) -> some View {
-        let isExpanded = store.expandedReportID == report.id
+        let isExpanded = store.expandedReportIDs.contains(report.id)
         return VStack(spacing: 0) {
             Button {
                 send(.userTappedReport(id: report.id))
@@ -285,23 +234,6 @@ public struct MyPageView: View {
             .dsTypography(.body6)
             .foregroundStyle(Color.GrayScale.g500)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// 카드 테두리 — g100 1.5(`outline-sb`), 모서리 0.
-    private var cardBorder: some View {
-        Rectangle().strokeBorder(Color.GrayScale.g100, lineWidth: .ds(.semiBold))
-    }
-
-    private func icon(_ image: Image) -> some View {
-        image
-            .resizable()
-            .scaledToFit()
-            .frame(width: Metric.iconSide, height: Metric.iconSide)
-    }
-
-    private enum Metric {
-        /// 프로필 영역 아이콘 한 변 16 — Figma `edit/16px`·`coupon/16px`·`info/16px`·`logo/kakao`.
-        static let iconSide: CGFloat = 16
     }
 }
 

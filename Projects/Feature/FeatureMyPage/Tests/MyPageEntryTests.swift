@@ -50,6 +50,8 @@ struct MyPageEntryTests {
         jobType: "BACKEND",
         jobTypeLabel: "백엔드 개발자",
         careerYears: 3,
+        // 마이페이지 행 제목은 «직군 · N년차 면접» 스냅샷에서 만든다 — 이 필드는 안 쓴다.
+        title: nil,
         interviewedAt: Date(timeIntervalSince1970: 1_783_728_000),
         portfolioFileName: "portfolio.pdf",
         portfolioDeleted: false,

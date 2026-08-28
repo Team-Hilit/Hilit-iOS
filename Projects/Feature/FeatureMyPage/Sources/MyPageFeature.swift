@@ -168,8 +168,9 @@ public struct MyPageFeature {
         public var replaceAvailable: Bool
         /// 지금 면접이 진행 중인가 — 삭제를 막는 조건(모달 «삭제할 수 없어요»).
         public var isInterviewInProgress: Bool
-        /// 펼쳐진 리포트. 한 번에 하나만 펼친다.
-        public var expandedReportID: Report.ID?
+        /// 펼쳐진 리포트들 — **여러 행을 동시에 펼쳐 둘 수 있다**(홈 위젯②와 같은 규칙).
+        /// 진입 시엔 전부 접혀 있고(시안 MyPage_Main), 행을 탭할 때마다 그 행만 토글된다.
+        public var expandedReportIDs: Set<Report.ID>
         /// 업로드 실패 카드 위 말풍선 노출 여부.
         public var isPortfolioTooltipPresented: Bool
         /// 파일 선택기(fileImporter) 표시 여부 — View binding 으로 닫힘까지 동기화된다.
@@ -189,7 +190,7 @@ public struct MyPageFeature {
             reports: IdentifiedArrayOf<Report> = [],
             replaceAvailable: Bool = true,
             isInterviewInProgress: Bool = false,
-            expandedReportID: Report.ID? = nil,
+            expandedReportIDs: Set<Report.ID> = [],
             isPortfolioTooltipPresented: Bool = false,
             presentedModal: Modal? = nil
         ) {
@@ -198,7 +199,7 @@ public struct MyPageFeature {
             self.reports = reports
             self.replaceAvailable = replaceAvailable
             self.isInterviewInProgress = isInterviewInProgress
-            self.expandedReportID = expandedReportID
+            self.expandedReportIDs = expandedReportIDs
             self.isPortfolioTooltipPresented = isPortfolioTooltipPresented
             self.presentedModal = presentedModal
         }

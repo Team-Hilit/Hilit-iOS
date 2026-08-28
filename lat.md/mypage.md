@@ -5,7 +5,7 @@
 ## 흐름
 `MyPageFeature`(타입 선언) + `MyPageReducer`(리듀서 본문 — 파일 길이 한도를 넘어 갈랐다, GuestFeedback 선례) + `MyPageView` + `MyPageModalCard`(모달 카드 층). Action 3분류 — [[architecture#핵심 결정 (Trade-off 기록)#D5. Reducer Action 3분류]]. 도메인 내부 화면 전환은 없다(단일 스크롤 화면 + 모달).
 
-세 덩어리로 읽는다: ① 프로필·계정 카드 ② «내 포트폴리오» ③ «내 면접 리포트» 목록. ①은 조회값을 그대로 그리고 ②·③ 만 화면 자체의 상태를 갖는다 — 포트폴리오는 `Portfolio` enum(empty·uploading·uploaded·registered·failed) 하나가 판 생김새를 통째로 바꾸고, 리포트는 `expandedReportID` 로 한 줄만 펼친다.
+세 덩어리로 읽는다: ① 프로필·계정 카드 ② «내 포트폴리오» ③ «내 면접 리포트» 목록. ①은 조회값을 그대로 그리고 ②·③ 만 화면 자체의 상태를 갖는다 — 포트폴리오는 `Portfolio` enum(empty·uploading·uploaded·registered·failed) 하나가 판 생김새를 통째로 바꾸고, 리포트는 `expandedReportIDs` 집합이라 여러 줄을 동시에 펼쳐 둘 수 있다(홈 위젯②와 같은 규칙 — 재조회 때는 사라진 세션의 펼침만 버린다). 리포트가 한 줄도 없으면 목록 대신 빈 판 한 장이고, 이렇게 내용이 짧을 때 «회원탈퇴» 는 화면 바닥에 붙는다 (MyPage_Report_empty).
 
 서버 응답 → 화면 값 변환은 `MyPageFeature+Mapping.swift` 가 표시 규칙의 **단일 소스**다 — 제목 조립, «삭제된 포트폴리오»·«생성 실패» 태그, 날짜·시각·용량 포맷이 전부 여기서 나온다.
 

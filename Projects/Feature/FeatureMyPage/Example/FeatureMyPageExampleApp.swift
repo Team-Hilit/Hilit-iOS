@@ -125,6 +125,8 @@ struct FeatureMyPageExampleApp: App {
             jobType: "IOS",
             jobTypeLabel: "iOS",
             careerYears: 2,
+            // 마이페이지 행 제목은 «직군 · N년차 면접» 스냅샷으로 만든다 — 이 필드는 안 쓴다.
+            title: nil,
             interviewedAt: Date(timeIntervalSince1970: 1_783_728_000 - TimeInterval(sessionId) * 86_400),
             portfolioFileName: "홍길동 자기소개서_SK프롭티어 기업 면접.pdf",
             portfolioDeleted: portfolioDeleted,
