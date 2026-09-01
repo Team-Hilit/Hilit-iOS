@@ -64,9 +64,9 @@ public struct ReportPeerFeedbackView: View {
     /// 하단 CTA. 링크가 이미 있으면(생성 성공·진입 회수) 항목이 잠겨 «생성» 이 남을 자리가 없다 —
     /// 그 자리를 재복사가 받는다(복사하지 못한 채 나갔어도 링크를 다시 손에 넣을 수 있게).
     ///
-    /// 비활성(항목 0개)은 라이트용 g50 바로 그려진다 — 다크 화면용 disabled 변형이 시안에 없다.
-    // @ds(component): 다크 판 CTA 비활성 — 시안 #27282F 판 + 흰 라벨(443:8046) → ButtonLarge
-    // disabled(g50 판 + g300 라벨).
+    /// 비활성(항목 0개)은 화면 루트 `.hilitSurface(.dark)` 를 타 다크 판 배색(b800 판 + g400 라벨)으로
+    /// 그려진다 — 이 화면 시안(443:8046)의 g900 판 + 흰 라벨과는 판·라벨색이 조금 다르지만,
+    /// 컴포넌트 시트의 `light/dark` 축이 나중에 그린 정본이라 그쪽을 따른다.
     @ViewBuilder
     private var cta: some View {
         if store.isAxisLocked {

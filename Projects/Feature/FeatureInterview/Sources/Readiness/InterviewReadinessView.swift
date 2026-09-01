@@ -34,6 +34,10 @@ public struct InterviewReadinessView: View {
             Spacer(minLength: 0)
             bottomArea
         }
+        // 바닥이 카메라 영상이라 화면 전체가 어두운 판 — 하위 DS 컴포넌트(TitleBox·ButtonLarge)가
+        // 여기서 다크 팔레트를 파생한다. 특히 «면접 시작하기» 비활성은 흰 판이 아니라
+        // 활성과 같은 b800 판에 g400 라벨로 죽는다 (Figma «…_Guide1» 683:9232).
+        .hilitSurface(.dark)
         // 좌상단 뒤로가기 — 면접 흐름 이탈(Figma «[Part2. 면접 녹화]» 전 프레임 공통 `<`).
         // cover 로 올라온 스택 밖 화면이라 present 판, 카메라 영상이 바닥이라 surface: .dark(흰 글리프).
         .hilitPresentedNavigationBar(
@@ -63,10 +67,9 @@ public struct InterviewReadinessView: View {
     /// Figma title-box: 상태바 아래 51pt 지점(= 화면 y94)부터. 2줄(68pt) 밴드를 고정해 1줄 타이틀(guide2)도
     /// 같은 시각 중심(y≈128)에 온다 (Figma top 94 vs 110 보정).
     /// 네비바(h44)가 safeAreaInset 으로 상태바 아래 43~87 을 차지하므로 남는 값은 7 이다(94 − 87).
-    /// DS `TitleBox` 소비 — 다크 판 글자색·마커는 `.hilitSurface(.dark)` 가 파생한다.
+    /// DS `TitleBox` 소비 — 다크 판 글자색·마커는 화면 루트의 `.hilitSurface(.dark)` 가 파생한다.
     private var titleBox: some View {
         TitleBox(titleLines, alignment: .center)
-            .hilitSurface(.dark)
             .frame(minHeight: 68)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, .ds(.p20))
@@ -105,6 +108,8 @@ public struct InterviewReadinessView: View {
             ButtonLarge("면접 시작하기", .bottom) {
                 send(.userTappedStart)
             }
+            // 비활성 배색은 판이 정한다 — 화면 루트 `.hilitSurface(.dark)` 로 배경(b800)은 활성과 같고
+            // 라벨만 g400 으로 죽는다. 버튼에 상태를 넘기지 않는 DS 규칙 그대로다.
             // 질문 준비 전 로딩 연출은 «협의 가능»(PRD §3.2) — 임시로 비활성만.
             // 권한 미허용도 같은 비활성 — 알림은 진입 시 alert 가 이미 했다.
             .disabled(
