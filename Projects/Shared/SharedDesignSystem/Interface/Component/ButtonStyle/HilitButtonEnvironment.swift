@@ -23,7 +23,7 @@ public enum HilitSurface: Sendable {
 /// 라벨을 숨기고 그 위에 겹치는 건 `makeBody` 안에서만 되고, 밖에서 `.opacity` 를 걸면 배경까지 사라진다.
 ///
 /// 스타일이 라벨을 `opacity(0)` 처리한 위에 스피너를 겹친다 — 라벨 크기가 유지돼 버튼 폭이 안 튄다.
-/// 스피너 색은 그 시점의 글자색을 따른다(로딩 중엔 보통 disabled 라 `g300`) — 배경과 대비를 맞추기 위해서.
+/// 스피너 색은 그 시점의 글자색을 따른다(로딩 중엔 보통 disabled 라 밝은 판 `g300`·어두운 판 `g400`) — 배경과 대비를 맞추기 위해서.
 public extension View {
     func hilitSurface(_ surface: HilitSurface) -> some View {
         environment(\.hilitSurface, surface)

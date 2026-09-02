@@ -70,6 +70,7 @@ public enum ButtonLargeLoginProvider: Sendable, CaseIterable {
 /// 두 메커니즘으로 쪼개지므로 타입 하나로 합쳤다. 내부 세그먼트는 여전히 `ButtonStyle` 로 눌림을 굴린다.
 ///
 /// 상태는 손대지 않는다 — pressed·disabled 는 자동이고, 로딩은 `.hilitButtonLoading(_:)`.
+/// 어두운 화면이면 화면 루트에 `.hilitSurface(.dark)` 하나 — 단일 버튼의 비활성 배색이 거기서 갈린다.
 public struct ButtonLarge<Leading: View, Trailing: View>: View {
     // 제네릭 안에 중첩하면 특수화마다 다른 타입이 돼 내부 스타일과 안 맞물린다 — 파일 스코프에 두고 별칭만.
     public typealias Kind = ButtonLargeKind
@@ -85,6 +86,7 @@ public struct ButtonLarge<Leading: View, Trailing: View>: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.hilitButtonIsLoading) private var isLoading
+    @Environment(\.hilitSurface) private var surface
 
     private let kind: Kind
     private let content: Content
@@ -109,7 +111,9 @@ public struct ButtonLarge<Leading: View, Trailing: View>: View {
 
     private func single(title: String, tone: Tone, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .buttonStyle(SingleStyle(kind: kind, tone: tone, isEnabled: isEnabled, isLoading: isLoading))
+            .buttonStyle(
+                SingleStyle(kind: kind, tone: tone, surface: surface, isEnabled: isEnabled, isLoading: isLoading)
+            )
     }
 
     // MARK: - 2버튼
@@ -295,9 +299,11 @@ private extension ButtonLargeLoginProvider {
 
 /// 단일 버튼 — 배경·테두리·눌림·비활성·로딩을 전부 여기서 굴린다.
 /// 시트의 한 칸을 고르는 순서: **열(disabled → pressed)이 행(tone)을 이긴다.**
+/// 판(`light/dark`)은 disabled 칸에서만 갈라진다 — 나머지 칸은 판이 무엇이든 같다.
 private struct SingleStyle: ButtonStyle {
     let kind: ButtonLargeKind
     let tone: ButtonLargeTone
+    let surface: HilitSurface
     let isEnabled: Bool
     let isLoading: Bool
 
@@ -312,30 +318,41 @@ private struct SingleStyle: ButtonStyle {
             .background(background(pressed: configuration.isPressed).ignoresSafeArea(edges: kind.safeAreaEdges))
             .overlay {
                 if tone == .light {
-                    Rectangle().strokeBorder(
-                        isEnabled ? Color.HilitBlack.b800 : Color.GrayScale.g300,
-                        lineWidth: .ds(.semiBold)
-                    )
+                    Rectangle().strokeBorder(borderColor, lineWidth: .ds(.semiBold))
                 }
             }
             .contentShape(Rectangle())
             .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
     }
 
-    /// disabled 칸은 행과 무관하게 g300 하나로 수렴한다(시트 dark·light disabled 라벨이 같은 회색).
+    /// disabled 라벨은 행(tone)과 무관하게 한 색으로 수렴하되, **판(light/dark)에 따라 갈린다** —
+    /// 밝은 판 g300, 어두운 판 g400 (Figma `button-large/bottom` 의 `light/dark` 축, dark·disabled 2117:10194).
     private var foreground: Color {
-        guard isEnabled else { return Color.GrayScale.g300 }
+        guard isEnabled else {
+            return surface == .light ? Color.GrayScale.g300 : Color.GrayScale.g400
+        }
         return tone == .dark ? Color.BlackWhite.white : Color.HilitBlack.b800
     }
 
     private func background(pressed: Bool) -> Color {
         guard isEnabled else {
+            // 어두운 판에서는 **배경이 활성과 같다** — 죽는 건 라벨뿐이다.
+            // 밝은 판용 g50 을 그대로 쓰면 어두운 화면 아래 흰 띠가 튀어 오히려 활성처럼 읽힌다.
+            guard surface == .light else { return restingBackground }
             return tone == .dark ? Color.GrayScale.g50 : Color.BlackWhite.white
         }
-        switch tone {
-        case .dark: return pressed ? Color.GrayScale.g900 : Color.HilitBlack.b800
-        case .light: return pressed ? Color.GrayScale.g100 : Color.BlackWhite.white
-        }
+        guard pressed else { return restingBackground }
+        return tone == .dark ? Color.GrayScale.g900 : Color.GrayScale.g100
+    }
+
+    /// 눌리지 않은 기본 배경 — 어두운 판의 disabled 가 이 색을 그대로 물려받는다.
+    private var restingBackground: Color {
+        tone == .dark ? Color.HilitBlack.b800 : Color.BlackWhite.white
+    }
+
+    /// `.light` 톤 테두리. 배경과 같은 규칙 — 어두운 판 disabled 는 테두리도 죽이지 않는다.
+    private var borderColor: Color {
+        isEnabled || surface == .dark ? Color.HilitBlack.b800 : Color.GrayScale.g300
     }
 }
 
@@ -435,6 +452,19 @@ private struct LoginStyle: ButtonStyle {
     }
     .frame(width: 375)
     .background(Color.BlackWhite.white)
+}
+
+#Preview("bottom 단일 — 어두운 판(disabled 는 배경 유지·라벨만 g400)") {
+    // Figma button-large/bottom 의 `light/dark` 축 dark 칸(2117:10194). 활성과 나란히 놓아
+    // «배경은 그대로, 글자만 죽는다» 를 눈으로 비교한다.
+    VStack(spacing: .ds(.p16)) {
+        ButtonLarge("면접 시작하기", .bottom) {}
+        ButtonLarge("면접 시작하기", .bottom) {}.disabled(true)
+    }
+    .padding(.vertical, .ds(.p24))
+    .frame(width: 375)
+    .background(Color.HilitBlack.b900)
+    .hilitSurface(.dark)
 }
 
 #Preview("bottom 2버튼 — 시트 순서(default·gray·2color·1disabled)") {

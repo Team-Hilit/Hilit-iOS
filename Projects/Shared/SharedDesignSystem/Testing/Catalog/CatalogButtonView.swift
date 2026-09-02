@@ -135,9 +135,10 @@ struct CatalogButtonView: View {
         }
     }
 
-    /// `.hilitSurface(.dark)` 는 화면이 한 번 선언하면 하위 mini·tag 팔레트가 따라 바뀐다.
+    /// `.hilitSurface(.dark)` 는 화면이 한 번 선언하면 하위 mini·tag 팔레트와
+    /// `ButtonLarge` 단일 비활성 배색이 따라 바뀐다.
     private var darkSurface: some View {
-        CatalogGroup(".hilitSurface(.dark) — mini · tag(다크 판 전용)") {
+        CatalogGroup(".hilitSurface(.dark) — ButtonLarge 비활성 · mini · tag(다크 판 전용)") {
             VStack(alignment: .leading, spacing: .ds(.p12)) {
                 ForEach(MiniButtonStyle.Tone.allCases, id: \.self) { tone in
                     Button(String(describing: tone)) {}
@@ -149,6 +150,9 @@ struct CatalogButtonView: View {
                         Button("지인피드백") {}.buttonStyle(.tag(phase))
                     }
                 }
+                // 활성과 나란히 — 어두운 판에서는 배경이 그대로고 라벨만 g400 으로 죽는다.
+                ButtonLarge("면접 시작하기", .bottom) {}
+                ButtonLarge("면접 시작하기", .bottom) {}.disabled(true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.ds(.p16))
