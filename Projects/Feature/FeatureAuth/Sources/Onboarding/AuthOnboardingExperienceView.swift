@@ -117,12 +117,14 @@ public struct AuthOnboardingExperienceView: View {
     }
 
     /// 휠 스크롤 위치 ↔ 상태 연결 — 스냅 결과만 view 액션으로 올리고, 상태가 바뀌면 휠도 따라 스크롤된다.
-    private var wheelSelection: Binding<ExperienceOption?> {
+    /// 바인딩 타입은 행 identity(`ForEach` 가 쓰는 `ExperienceOption.id` = `Int`)와 같아야 한다 —
+    /// `ExperienceOption?` 로 두면 타입이 안 맞아 스냅해도 setter 가 불리지 않고 선택이 0 에 고정된다.
+    private var wheelSelection: Binding<Int?> {
         Binding(
-            get: { store.selectedExperience },
-            set: { option in
-                guard let option, option != store.selectedExperience else { return }
-                send(.userSelectedExperience(option))
+            get: { store.selectedExperience.id },
+            set: { years in
+                guard let years, years != store.selectedExperience.years else { return }
+                send(.userSelectedExperience(ExperienceOption(years: years)))
             }
         )
     }
