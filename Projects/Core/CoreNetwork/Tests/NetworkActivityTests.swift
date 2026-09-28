@@ -27,6 +27,17 @@ final class NetworkActivityTests: XCTestCase {
     }
 
     @MainActor
+    func test_요청_시작_즉시_입력을_차단한다() async throws {
+        let client = NetworkClient { _ in
+            let blocking = await NetworkActivity.shared.isBlocking
+            XCTAssertTrue(blocking, "모달 표출 지연과 무관하게 요청 중엔 차단해야 한다")
+            return Data()
+        }.trackingActivity()
+
+        _ = try await client.request(NetworkRequest(path: "/ping"))
+    }
+
+    @MainActor
     func test_요청이_실패해도_카운터가_복귀한다() async {
         let before = NetworkActivity.shared.inFlightCount
         let client = NetworkClient { _ in

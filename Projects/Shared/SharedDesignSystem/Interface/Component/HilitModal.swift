@@ -57,7 +57,8 @@ public extension View {
     ///
     /// 화면에서 쓰면 안 된다 — 화면 안쪽 overlay 는 네비바 밑에 깔린다(그래서 `hilitModal` 은 cover).
     /// 루트가 cover 를 쓰면 화면 모달과 presentation 자리를 다투므로 여기만 overlay 로 남긴다
-    /// (전역 로딩 = `AppView`). 대신 화면 모달이 떠 있는 동안엔 그 cover 아래로 가려진다.
+    /// (전역 로딩 = 앱 최상단 창 `GlobalLoadingWindow` 의 루트). 루트 뷰에 얹으면 화면 모달·cover 가
+    /// 떠 있는 동안 그 아래로 가려지므로, 모든 cover 위에 떠야 하는 전역 로딩은 별도 창의 루트에 얹는다.
     func hilitModalOverlay<Content: View>(
         isPresented: Bool,
         @ViewBuilder content: () -> Content

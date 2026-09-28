@@ -91,11 +91,12 @@ struct AppView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { store.send(.sceneBecameActive) }
         }
-        // 전역 시스템 로딩 — 모든 API in-flight(NetworkActivity) 동안 화면을 잠근다.
-        // 루트라 `overlay` 변형을 쓴다 — 화면 모달(`hilitModal` = cover)과 presentation 자리를
-        // 다투지 않게 하려는 것이고, 루트는 NavigationStack 밖이라 overlay 로도 네비바 위에 깔린다.
-        .hilitModalOverlay(isPresented: showsGlobalLoading && NetworkActivity.shared.isLoading) {
-            LoadingModal()
+        // 전역 시스템 로딩 — 모든 API in-flight(NetworkActivity) 동안 입력을 막고 LoadingModal 을 띄운다.
+        // 루트 overlay 는 fullScreenCover(온보딩 등) 아래에 깔리므로 최상단 별도 창에 띄운다.
+        // 여기서는 창을 설치하고 «얹을 자리인가» 만 흘려 넣는다.
+        .onAppear { GlobalLoadingWindow.shared.install() }
+        .onChange(of: showsGlobalLoading, initial: true) { _, isEnabled in
+            GlobalLoadingWindow.shared.isEnabled = isEnabled
         }
     }
 

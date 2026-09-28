@@ -17,20 +17,32 @@ public final class NetworkActivity {
 
     public private(set) var inFlightCount = 0
 
-    /// 전역 로딩 오버레이 표출 조건 — **켜기는 늦추고, 끄기는 살짝 유예**한다.
-    /// `inFlightCount > 0` 을 그대로 쓰면 두 곳에서 어긋난다.
+    /// 전역 로딩 오버레이 표출 조건 — **켜기는 늦추고, 한번 켜지면 최소 시간은 유지**한다.
+    /// `inFlightCount > 0` 을 그대로 쓰면 세 곳에서 어긋난다.
     /// - 빠른 응답: 모달이 떴다 곧 사라져 «반짝» 한다 → `showDelay` 안에 끝나면 아예 안 띄운다.
+    /// - 지연 직후 응답: 켜지자마자 꺼져 «반짝» 한다 → 켜지면 `minimumVisible` 만큼 유지한다.
     /// - 순차 호출: A 종료와 B 시작 사이에 카운트가 0 을 스쳐 «깜빡» 한다 → `settleDelay` 로 잇는다.
     ///
-    /// 두 지연 모두 체인 전체에서 한 번씩만 든다 — 켜기 예약은 hop 마다 다시 걸지 않고,
+    /// 지연은 체인 전체에서 한 번씩만 든다 — 켜기 예약은 hop 마다 다시 걸지 않고,
     /// 끄기 예약은 다음 `begin()` 이 취소한다. API·콘텐츠 도착 시점엔 영향 없다(오버레이 전용).
+    /// 표출 전 구간의 연타는 `isBlocking` 이 막는다.
     public private(set) var isLoading = false
 
-    /// 켜기 지연 — 이 안에 끝나는 요청은 로딩을 표시하지 않는다.
-    private static let showDelay: Duration = .milliseconds(200)
+    /// 입력 차단 조건 — 요청 시작 **즉시** 켜진다(보이지 않는 차단막). 모달 표출 지연(`showDelay`)
+    /// 동안에도 버튼 연타로 같은 요청이 두 번 나가지 않게 하려는 것. 모달이 떠 있는 동안도 유지한다.
+    public var isBlocking: Bool { inFlightCount > 0 || isLoading }
+
+    /// 켜기 지연 — 이 안에 끝나는 요청은 로딩을 표시하지 않는다(입력 차단만 든다).
+    private static let showDelay: Duration = .milliseconds(100)
+
+    /// 최소 표출 — 한번 켜진 모달은 이만큼 지난 뒤에야 끈다.
+    private static let minimumVisible: Duration = .milliseconds(300)
 
     /// 끄기 유예 — 체인 hop 사이 틈만 덮을 최소치. 완료 후 이만큼 딤이 남는다.
     private static let settleDelay: Duration = .milliseconds(80)
+
+    /// 모달이 켜진 시각 — 최소 표출 잔여 시간 계산용. 꺼지면 nil.
+    private var shownAt: ContinuousClock.Instant?
 
     /// 켜기 예약 진행 중 — 체인 중간에 카운트가 0 을 스쳐도 리셋하지 않는다.
     /// 그래야 지연이 **체인 시작 기준**으로 재져, 짧은 요청 여러 개가 이어질 때도 제때 뜬다.
@@ -53,6 +65,7 @@ public final class NetworkActivity {
             guard let self else { return }
             isShowScheduled = false
             guard inFlightCount > 0 else { return }   // 지연 안에 끝났다 — 표시 없이 넘어간다
+            shownAt = .now
             isLoading = true
         }
     }
@@ -60,10 +73,14 @@ public final class NetworkActivity {
     func end() {
         inFlightCount -= 1
         guard inFlightCount == 0, isLoading else { return }
+        // 최소 표출 잔여분과 hop 유예 중 긴 쪽만큼 기다렸다 끈다.
+        let remaining = shownAt.map { Self.minimumVisible - (ContinuousClock.now - $0) } ?? .zero
+        let delay = max(Self.settleDelay, remaining)
         hideTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.settleDelay)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, inFlightCount == 0 else { return }
             isLoading = false
+            shownAt = nil
         }
     }
 }

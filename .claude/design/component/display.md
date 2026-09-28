@@ -42,7 +42,7 @@
 **표출 층 — 네비바까지 덮는다.** `.hilitModal`·`.hilitBottomSheet` 는 `fullScreenCover`(+ `.presentationBackground(.clear)`) 로 뜬다. 네비바는 시스템 UIKit 바라 뷰 안쪽 `overlay` 로는 딤이 그 밑에 깔려 X 만 환하게 남기 때문 — 시스템 alert 이 바를 덮는 것과 같은 층을 쓴다. 따라오는 규칙 둘:
 
 - **한 화면에 두 번 붙이지 않는다** — 모달·시트를 섞어 두 번 붙여도 마찬가지로 둘째 cover 가 조용히 무시된다. 2개↑ 는 `item:` 에 enum 하나 (Bool 두 개 금지가 규약에서 **제약**으로 승격).
-- **앱 루트는 `.hilitModalOverlay`** — 전역 로딩(`AppView`) 전용 overlay 변형. 루트는 NavigationStack 밖이라 overlay 로도 네비바 위에 깔리고, 루트가 cover 를 쓰면 화면 모달과 presentation 자리를 다툰다. 대신 화면 모달이 떠 있는 동안엔 그 아래로 가려진다.
+- **앱 루트는 `.hilitModalOverlay`** — 전역 로딩 전용 overlay 변형. 루트는 NavigationStack 밖이라 overlay 로도 네비바 위에 깔리고, 루트가 cover 를 쓰면 화면 모달과 presentation 자리를 다툰다. 루트 뷰에 얹으면 cover 아래로 가려지므로 전역 로딩은 최상단 별도 창(`GlobalLoadingWindow`)의 루트에 얹는다.
 
 **모달은 닫힘 전환이 즉시다**(표출만 페이드 0.2) — cover 해제에는 전환을 태울 자리가 없다. 시트는 판이 먼저 내려간 **뒤**에 `onDismiss` 를 부르는 식으로 그 자리를 만들어 뒀다(슬라이드 0.3).
 
