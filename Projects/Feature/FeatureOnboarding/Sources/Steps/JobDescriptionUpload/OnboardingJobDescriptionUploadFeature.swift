@@ -67,7 +67,7 @@ public struct OnboardingJobDescriptionUploadFeature {
 
         /// 검증 성공 후에는 «직접 입력하기» 탭을 잠근다 — `TabSelector.Item(isEnabled:)` 로 내려간다.
         /// (분석 중 인라인 필드 잠금은 없다 — 화면은 전역 LoadingModal 이 덮고, 그 사이 입력이
-        /// 들어와도 `binding(\.linkText)` 가 in-flight 검증을 취소한다.)
+        /// 들어와도 `onChange(of: \.linkText)` 가 in-flight 검증을 취소한다.)
         public var isDirectTextDisabled: Bool { linkValidation == .success }
 
         /// 직접입력 글자 수 — 카운터 분자(카운터 자체는 `HilitTextEditor` 가 그린다).
@@ -207,6 +207,15 @@ public struct OnboardingJobDescriptionUploadFeature {
 
     public var body: some ReducerOf<Self> {
         BindingReducer(action: \.view)
+            // 링크가 **실제로 바뀐 때만** 이전 검증 결과(에러·성공)를 버리고 진행 중 검증도 취소한다.
+            // `.binding(\.linkText)` 로 받으면 안 된다 — TextField 는 포커스가 풀릴 때 같은 값으로도
+            // 바인딩을 다시 쓰는데, 그걸 입력으로 보고 에러를 지우면 포커스 해제만으로 에러가 사라진다.
+            .onChange(of: \.linkText) { _, _ in
+                Reduce { state, _ in
+                    state.linkValidation = .idle
+                    return .cancel(id: CancelID.validate)
+                }
+            }
 
         Reduce { state, action in
             switch action {
@@ -231,11 +240,6 @@ public struct OnboardingJobDescriptionUploadFeature {
             }
             .cancellable(id: CancelID.tooltip, cancelInFlight: true)
 
-        case .binding(\.linkText):
-            // 링크가 바뀌면 이전 검증 결과(에러·성공)는 무효 — 진행 중 검증도 버린다.
-            state.linkValidation = .idle
-            return .cancel(id: CancelID.validate)
-
         case .binding:
             return .none
 
@@ -250,6 +254,7 @@ public struct OnboardingJobDescriptionUploadFeature {
             return submitLink(&state)
 
         case .userTappedClearLink:
+            // 바인딩을 거치지 않는 경로라 `onChange(of: \.linkText)`(BindingReducer 에만 걸림)가 안 돈다 — 직접 초기화한다.
             state.linkText = ""
             state.linkValidation = .idle
             return .cancel(id: CancelID.validate)

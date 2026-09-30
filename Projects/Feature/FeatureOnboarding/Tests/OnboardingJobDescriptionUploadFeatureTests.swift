@@ -55,6 +55,19 @@ struct OnboardingJobDescriptionUploadFeatureTests {
         await store.finish()
     }
 
+    @Test("같은 값으로 바인딩이 다시 써져도(포커스 해제) 에러 상태는 유지된다")
+    func sameValueBindingKeepsError() async {
+        var initialState = OnboardingJobDescriptionUploadFeature.State()
+        initialState.linkText = link
+        initialState.linkValidation = .failure(message: "x")
+        let store = TestStore(initialState: initialState) {
+            OnboardingJobDescriptionUploadFeature()
+        }
+
+        await store.send(\.view.binding.linkText, link)
+        #expect(store.state.linkValidation == .failure(message: "x"))
+    }
+
     @Test("링크를 비우면 대기 상태로 돌아간다")
     func emptyingLinkReturnsToIdle() async {
         var initialState = OnboardingJobDescriptionUploadFeature.State()
