@@ -31,7 +31,7 @@ let project = Project.makeModule(
                 "NSAppTransportSecurity": ["NSAllowsArbitraryLoads": true],
                 // live 하네스(HILIT_ACCESS_TOKEN)의 실서버 주소 — `NetworkClient.defaultBaseURL` 이
                 // Bundle 에서 읽는다. Example 은 계별 xcconfig 를 안 타므로 Dev 서버 고정.
-                "API_BASE_URL": "https://hilit.my",
+                "API_BASE_URL": "https://dev.hilit.my",
                 "CFBundleShortVersionString": "$(MARKETING_VERSION)",
                 "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
                 "ITSAppUsesNonExemptEncryption": false,

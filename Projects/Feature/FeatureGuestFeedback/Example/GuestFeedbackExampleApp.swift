@@ -34,7 +34,7 @@ struct ExampleHomeView: View {
                         NavigationLink(scenario.title, value: scenario)
                     }
                 }
-                Section("실서버 (dev — https://hilit.my)") {
+                Section("실서버 (dev — https://dev.hilit.my)") {
                     TextField("공유 토큰 붙여넣기", text: $realServerToken)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -63,7 +63,7 @@ struct ExampleHomeView: View {
         } withDependencies: {
             $0.networkClient = .live(
                 session: .shared,
-                baseURL: { URL(string: "https://hilit.my")! }
+                baseURL: { URL(string: "https://dev.hilit.my")! }
             )
         }
     }

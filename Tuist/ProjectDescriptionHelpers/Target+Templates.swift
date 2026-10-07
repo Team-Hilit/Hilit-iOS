@@ -138,7 +138,7 @@ public extension Target {
             "NSSpeechRecognitionUsageDescription": "AI 면접에서 답변 음성이 올바르게 입력되는지 확인하기 위해 음성 인식을 사용합니다.",
             // 수출 규정 — 통신은 HTTPS(OS 제공 암호)뿐이고 자체 암호 구현이 없다. false 를 박아 두면
             // 업로드마다 App Store Connect 가 묻는 수출 규정 문항을 건너뛴다.
-            // (ATS 예외는 두지 않는다 — 전 계가 https://hilit.my 다. HTTP 디버깅은 Example 하네스 몫)
+            // (ATS 예외는 두지 않는다 — 전 계가 https 다 (운영 hilit.my · Dev/QA dev.hilit.my). HTTP 디버깅은 Example 하네스 몫)
             "ITSAppUsesNonExemptEncryption": false
         ])
         // Sign in with Apple — 시뮬레이터는 이 entitlement만으로 동작하고, 실기기는
