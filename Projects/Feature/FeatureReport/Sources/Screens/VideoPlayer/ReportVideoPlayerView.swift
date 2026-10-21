@@ -57,9 +57,6 @@ public struct ReportVideoPlayerView: View {
             if let message = store.playbackFailureMessage {
                 failure(message)
             }
-            if store.isPlaybackControlVisible {
-                playbackControls
-            }
             chrome
         }
         // 영상 풀블리드 위 투명 바(기본값) — X 는 플레이어를 닫고 리포트로 (리듀서 소유).
@@ -160,10 +157,18 @@ public struct ReportVideoPlayerView: View {
 
     // MARK: - 상단·하단 고정 요소
 
-    /// 상단 X 는 `.hilitNavigationBar` 가 얹는다 — 여기는 하단 바만 남는다.
+    /// 상단 X 는 `.hilitNavigationBar` 가 얹는다 — 여기는 재생 컨트롤과 하단 바만 남는다.
+    /// 재생 컨트롤은 화면이 아니라 «네비 바 아래 ~ 진행바 위» 사이 한가운데에 선다
+    /// (Figma 443:7852 위아래 268 대칭) — 화면 가운데에 두면 하단 바 높이만큼 아래로 처진다.
+    /// 빈 ZStack 으로 자리를 늘 잡아 둬야 컨트롤이 숨어도 하단 바가 바닥에 붙어 있다.
     private var chrome: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 0)
+            ZStack {
+                if store.isPlaybackControlVisible {
+                    playbackControls
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             if store.isBottomBarVisible {
                 bottomBar
             }
