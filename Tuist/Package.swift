@@ -46,6 +46,9 @@ let package = Package(
         // 유니버설 링크(FDL 대체) — 링크 도메인·AASA·deferred 를 SaaS 가 맡는다. 수신 전용으로만 쓴다.
         .package(url: "https://github.com/ConnectingDotsInfotech/chottulink-ios-sdk.git", from: "1.1.2"),
         .package(url: "https://github.com/kakao/kakao-ios-sdk", from: "2.22.0"),
-        .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.25.0")
+        // 1.26.0+ 부터 Xcode 27 에서 컴파일된다 (NavigationStack init 의 main actor key path 에러 수정).
+        // 1.26.2 는 swift-tools-version 6.4 라 Xcode 27 전용 — Package.resolved 는 Xcode 26 과도 맞는 1.26.1 에 둔다.
+        // 전이 의존 swift-sharing 도 2.9.0+ 여야 Swift 6.4 링크 에러(`SharedReader.__generation` 미정의)가 안 난다 — Package.resolved 핀.
+        .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.26.1")
     ]
 )

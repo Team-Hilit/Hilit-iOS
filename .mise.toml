@@ -1,4 +1,5 @@
 # 팀 공통 도구 버전 핀 — mise(https://mise.jdx.dev)가 읽는다.
 # Tuist 버전이 다르면 생성물(xcodeproj)이 달라지므로 반드시 여기서 버전을 올린다.
+# Xcode 27 은 4.205+ 필요 — 그 전 버전은 SPM 패키지 deployment target 을 iOS 12·13 으로 생성해 빌드가 거부된다.
 [tools]
-tuist = "4.79.7"
+tuist = "4.212.0"
