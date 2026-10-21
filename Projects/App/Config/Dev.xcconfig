@@ -6,7 +6,7 @@
 // D14 개발 서버. HTTPS 필수 — http 로 붙으면 Caddy 가 308 로 https 에 넘기는데
 // scheme 이 바뀌어 origin 이 달라지므로 URLSession 이 Authorization 헤더를 떼고 재요청 → 403.
 APP_ENV = dev
-API_BASE_URL = https:/$()/hilit.my
+API_BASE_URL = https:/$()/dev.hilit.my
 
 // 카카오 Native 앱 키 — 개발계 Kakao 앱 (Secrets.xcconfig)
 KAKAO_NATIVE_APP_KEY = $(KAKAO_NATIVE_APP_KEY_DEV)

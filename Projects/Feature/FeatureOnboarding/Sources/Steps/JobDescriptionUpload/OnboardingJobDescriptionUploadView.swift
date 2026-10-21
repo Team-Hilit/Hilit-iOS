@@ -211,7 +211,7 @@ private enum Copy {
     /// Figma 리터럴 그대로 (435:1600).
     static let directTextPlaceholder = "텍스트를 입력해주세요"
     /// Figma 는 필러 문구(«서브 텍스트를 입력해주세요») — 임시 초안.
-    static let idleHelper = "채용 사이트의 공고 링크를 붙여넣으면 자동으로 분석해요." // TODO: 확정 카피 반영
+    static let idleHelper = "채용 사이트의 공고 링크를 넣고 계속하기를 누르면 분석해요." // TODO: 확정 카피 반영
     /// Figma 는 필러 문구 — 임시 초안.
     static let successHelper = "채용공고를 확인했어요." // TODO: 확정 카피 반영
     static let skipTooltip = "링크 입력을 원하지 않으면 넘어가도 괜찮아요."

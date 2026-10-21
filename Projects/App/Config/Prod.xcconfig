@@ -2,7 +2,7 @@
 #include "Version.xcconfig"
 
 // 운영계 — Release Configuration 에 연결.
-// 서버는 단일계라 Dev/QA/Prod 가 같은 호스트를 본다 — 계 구분은 APP_ENV·bundle ID 로만.
+// 운영 서버(hilit.my). Dev·QA 는 개발 서버(dev.hilit.my)를 본다.
 APP_ENV = prod
 API_BASE_URL = https:/$()/hilit.my
 

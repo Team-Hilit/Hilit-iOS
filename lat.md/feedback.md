@@ -34,7 +34,7 @@ GuestEvaluationView 는 시트가 아니라 자유전환이다 — 최초 진입
 - 파서는 엄격 판정 — 스킴 갈래는 host 일치 + path 세그먼트 정확히 1개, https 갈래는 host·path 일치 + `token` 쿼리 비어있지 않음.
 - 설치 상태 진입은 SDK 없이 성립한다 — Associated Domains 만 잡히면 iOS 가 쿼리 원본째 `onOpenURL` 로 준다. 링크 SaaS(ChottuLink)가 맡는 건 **deferred**(미설치 → 스토어 → 첫 실행)와 클릭 어트리뷰션뿐이고, 그 경로는 [[deeplink]] 가 가진다.
 - X 는 시안에 없는 코드 전용 상태(플레이스홀더 관례) — 시안 수령 시 교체. 평가 중 닫아도 draft 가 남아 재진입 시 이어하기로 복원된다. X 가 글자를 덮지 않도록 라이트 화면의 본문 시작 높이는 시안 실측을 그대로 쓴다(온보딩 34 = title-box y77 − 상태바 43, 요약 42 → p40) — 마침 X 가 끝나는 높이(위 10 + 글리프 24)와 같다.
-- Example 은 dismissed 라우팅을 붙이지 않는다(화면 상태 확인 목적) — X 는 실앱에서만 유효. 실서버 하네스는 hilit.my 를 직접 주입한다.
+- Example 은 dismissed 라우팅을 붙이지 않는다(화면 상태 확인 목적) — X 는 실앱에서만 유효. 실서버 하네스는 dev.hilit.my 를 직접 주입한다.
 - 사용자측 공유 UI(F4·R1 지인 섹션)는 여전히 후속 — R1 리포트(PR #71) 머지 뒤 그 화면에서 FeedbackShareClient 로 배선한다.
 
 ## 게이트 판정

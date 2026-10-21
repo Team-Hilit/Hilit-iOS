@@ -12,7 +12,8 @@ import Foundation
 // @lat: [[onboarding#JD 업로드]]
 /// 온보딩 STEP 1 — 채용공고(JD) 링크 입력 (선택 스텝, 위저드 스택의 루트).
 /// 링크 붙여넣기 / 본문 직접 입력은 같은 화면의 탭(모드) 전환이고,
-/// 링크 검증의 로딩·에러·성공은 별도 화면이 아니라 `LinkValidation` 하위 상태로 표현한다.
+/// 링크 검증은 «계속하기»(또는 키보드 리턴)를 누를 때만 호출한다 — 성공이면 바로 다음 스텝,
+/// 실패면 `LinkValidation.failure` 로 필드 아래 에러를 띄우고 머문다.
 /// 수집 결과는 delegate(.continueRequested(JDSubmission?))로 코디네이터에 올린다 — nil 은 스킵.
 @Reducer
 public struct OnboardingJobDescriptionUploadFeature {
@@ -30,12 +31,13 @@ public struct OnboardingJobDescriptionUploadFeature {
     public enum LinkValidation: Equatable, Sendable {
         case idle
         /// 분석 중 — **화면엔 안 그린다**(필드는 idle 그대로). 대기 표시는 `validate` in-flight 를
-        /// 세는 AppView 의 전역 LoadingModal 몫이라 인라인 스피너를 달면 이중 로딩이 된다.
-        /// 이 값은 «계속하기» 비활성·재검증 취소를 가르는 게이트로만 산다.
+        /// 세는 전역 LoadingModal 몫이라 인라인 스피너를 달면 이중 로딩이 된다.
+        /// 이 값은 «계속하기» 중복 탭을 막는 게이트로만 산다.
         case loading
         /// 실패 — 빨간 바 + 서버 message(또는 기본 문구) 서브 줄.
         case failure(message: String)
-        /// 성공 — 초록 바. 서버가 JD 를 캐싱한 상태.
+        /// 성공 — 초록 바. 서버가 JD 를 캐싱한 상태. 성공 즉시 다음 스텝으로 넘어가므로
+        /// 이 화면으로 되돌아왔을 때(뒤로가기·draft 복원) 보인다.
         case success
     }
 
@@ -64,8 +66,8 @@ public struct OnboardingJobDescriptionUploadFeature {
         public var isTooltipExpired: Bool = false
 
         /// 검증 성공 후에는 «직접 입력하기» 탭을 잠근다 — `TabSelector.Item(isEnabled:)` 로 내려간다.
-        /// (분석 중 인라인 필드 잠금은 없앴다 — 화면은 전역 LoadingModal 이 덮고, 그 사이 입력이
-        /// 들어와도 `binding(\.linkText)` 가 in-flight 검증을 취소하고 다시 예약한다.)
+        /// (분석 중 인라인 필드 잠금은 없다 — 화면은 전역 LoadingModal 이 덮고, 그 사이 입력이
+        /// 들어와도 `onChange(of: \.linkText)` 가 in-flight 검증을 취소한다.)
         public var isDirectTextDisabled: Bool { linkValidation == .success }
 
         /// 직접입력 글자 수 — 카운터 분자(카운터 자체는 `HilitTextEditor` 가 그린다).
@@ -92,14 +94,21 @@ public struct OnboardingJobDescriptionUploadFeature {
             linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
 
+        /// 링크가 클라이언트 1차 형식 검사(http(s) + 호스트)를 통과하는가.
+        public var isLinkFormatValid: Bool {
+            OnboardingJobDescriptionUploadFeature.isValidLinkFormat(
+                linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+
         /// «계속하기» 활성 조건 — 두 탭 모두 «빈 입력(스킵) 또는 유효한 입력» 일 때만 열린다.
-        /// 링크 탭은 링크를 넣은 순간 검증 성공까지 잠긴다 — 미검증(idle·분석 중·실패) 링크로 넘기면
-        /// 붙여넣은 공고가 조용히 버려진다. 빈 입력은 스킵 경로라 열어 둔다(툴팁 안내와 일치).
+        /// 링크 탭은 형식 검사를 통과하면 열린다 — 서버 검증은 이 버튼이 부른다(실패 후 재탭 = 재시도).
+        /// 분석 중엔 잠가 중복 호출을 막는다. 빈 입력은 스킵 경로라 열어 둔다(툴팁 안내와 일치).
         /// 직접입력 탭은 빈 입력(스킵)이거나 유효 길이(200~3,000자)일 때 (PRD S1 무효 입력 시 다음 꺼짐).
         public var isContinueEnabled: Bool {
             switch mode {
             case .link:
-                return isLinkEmpty || linkValidation == .success
+                return isLinkEmpty || (isLinkFormatValid && linkValidation != .loading)
             case .directText:
                 return directText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isDirectTextValid
             }
@@ -149,7 +158,7 @@ public struct OnboardingJobDescriptionUploadFeature {
             case binding(BindingAction<State>)
             case onAppear
             case userSelectedMode(InputMode)
-            /// 키보드 리턴 — 디바운스 없이 즉시 검증.
+            /// 키보드 리턴 — «계속하기» 와 같은 경로. 형식이 틀리면 형식 에러를 띄운다.
             case userSubmittedLink
             /// 링크 지우기 — 화면의 클리어 버튼은 `HilitTextField` 안에 있어 바인딩으로 도착하지만,
             /// «지우면 검증 결과도 버린다» 규칙은 리듀서 쪽 진입점으로 남겨 둔다.
@@ -164,8 +173,6 @@ public struct OnboardingJobDescriptionUploadFeature {
         /// effect 결과·리듀서 내부 신호. 리듀서만 방출한다.
         @CasePathable
         public enum Inner: Equatable, Sendable {
-            /// 디바운스 경과(또는 제출) — 검증 API 호출 시작.
-            case validationStarted
             case linkValidated(JDValidation)
             case linkValidationFailed
             /// 스킵 툴팁 노출 시간(3초) 경과 — 툴팁을 감춘다.
@@ -184,8 +191,6 @@ public struct OnboardingJobDescriptionUploadFeature {
         }
     }
 
-    /// 마지막 입력 후 자동 검증까지의 디바운스 — 입력이 1초간 멈추면 검증을 시작한다.
-    static let validationDebounce: Duration = .seconds(1)
     /// 네트워크 오류 등 서버 message 가 없을 때의 기본 에러 문구.
     static let fallbackErrorMessage = "링크를 분석하지 못했어요. 링크를 확인해 주세요." // TODO: 확정 카피 반영
     /// 클라이언트 1차 형식 검사 실패 문구 — 서버 왕복 전에 걸러진 경우.
@@ -202,6 +207,15 @@ public struct OnboardingJobDescriptionUploadFeature {
 
     public var body: some ReducerOf<Self> {
         BindingReducer(action: \.view)
+            // 링크가 **실제로 바뀐 때만** 이전 검증 결과(에러·성공)를 버리고 진행 중 검증도 취소한다.
+            // `.binding(\.linkText)` 로 받으면 안 된다 — TextField 는 포커스가 풀릴 때 같은 값으로도
+            // 바인딩을 다시 쓰는데, 그걸 입력으로 보고 에러를 지우면 포커스 해제만으로 에러가 사라진다.
+            .onChange(of: \.linkText) { _, _ in
+                Reduce { state, _ in
+                    state.linkValidation = .idle
+                    return .cancel(id: CancelID.validate)
+                }
+            }
 
         Reduce { state, action in
             switch action {
@@ -226,18 +240,6 @@ public struct OnboardingJobDescriptionUploadFeature {
             }
             .cancellable(id: CancelID.tooltip, cancelInFlight: true)
 
-        case .binding(\.linkText):
-            // 링크가 바뀌면 이전 검증 결과는 무효 — 비어 있지 않으면 재검증을 디바운스 예약한다.
-            state.linkValidation = .idle
-            guard !trimmedLink(state).isEmpty else {
-                return .cancel(id: CancelID.validate)
-            }
-            return .run { send in
-                try await clock.sleep(for: Self.validationDebounce)
-                await send(.inner(.validationStarted))
-            }
-            .cancellable(id: CancelID.validate, cancelInFlight: true)
-
         case .binding:
             return .none
 
@@ -247,11 +249,12 @@ public struct OnboardingJobDescriptionUploadFeature {
             return .none
 
         case .userSubmittedLink:
-            guard !trimmedLink(state).isEmpty, state.linkValidation != .loading else { return .none }
-            // 즉시 시작 — validationStarted 의 effect 가 같은 CancelID 로 디바운스 예약분을 대체한다.
-            return .send(.inner(.validationStarted))
+            // 빈 링크의 리턴은 스킵으로 넘기지 않는다 — 스킵은 버튼으로만.
+            guard !trimmedLink(state).isEmpty else { return .none }
+            return submitLink(&state)
 
         case .userTappedClearLink:
+            // 바인딩을 거치지 않는 경로라 `onChange(of: \.linkText)`(BindingReducer 에만 걸림)가 안 돈다 — 직접 초기화한다.
             state.linkText = ""
             state.linkValidation = .idle
             return .cancel(id: CancelID.validate)
@@ -263,7 +266,7 @@ public struct OnboardingJobDescriptionUploadFeature {
             return .send(.delegate(.closeRequested))
 
         case .userTappedContinue:
-            return submit(state)
+            return submit(&state)
 
         case .userTappedSkip:
             // 진행 중인 검증은 버린다 — 스킵한 뒤 늦게 도착한 성공이 다음 스텝을 한 번 더 push 하면 안 된다.
@@ -275,16 +278,12 @@ public struct OnboardingJobDescriptionUploadFeature {
     }
 
     /// 하단 «계속하기» — 현재 탭의 입력을 delegate 페이로드로 옮긴다. 선택 스텝이라 nil(스킵)도 정상 경로다.
-    private func submit(_ state: State) -> Effect<Action> {
+    private func submit(_ state: inout State) -> Effect<Action> {
         switch state.mode {
         case .link:
-            let url = trimmedLink(state)
             // 빈 링크는 스킵(nil) — 툴팁 안내와 일치.
-            guard !url.isEmpty else { return .send(.delegate(.continueRequested(nil))) }
-            // 미검증 링크는 «계속하기» 가 꺼져 있어 도달하지 않지만 방어적으로 막는다
-            // (검증은 보통 전역 LoadingModal 이 덮지만 showDelay(200ms) 안에 끝나면 모달 없이 지나간다).
-            guard state.linkValidation == .success else { return .none }
-            return .send(.delegate(.continueRequested(.link(url))))
+            guard !trimmedLink(state).isEmpty else { return .send(.delegate(.continueRequested(nil))) }
+            return submitLink(&state)
         case .directText:
             let text = state.directText.trimmingCharacters(in: .whitespacesAndNewlines)
             // 빈 입력은 스킵(nil). 길이 무효는 «계속하기» 가 꺼져 있어 도달하지 않지만 방어적으로 막는다.
@@ -294,33 +293,45 @@ public struct OnboardingJobDescriptionUploadFeature {
         }
     }
 
+    /// 비어 있지 않은 링크 제출 — 검증을 부르고, 성공 응답이 오면 다음 스텝으로 넘긴다.
+    private func submitLink(_ state: inout State) -> Effect<Action> {
+        let url = trimmedLink(state)
+        switch state.linkValidation {
+        case .loading:
+            // 이미 분석 중 — 중복 호출하지 않는다.
+            return .none
+        case .success:
+            // 이미 검증된 링크(뒤로가기 재진입·draft 복원) — 다시 부르지 않고 넘긴다.
+            return .send(.delegate(.continueRequested(.link(url))))
+        case .idle, .failure:
+            break
+        }
+        // 클라이언트 1차 형식 검사 — 불일치는 서버 왕복 없이 즉시 에러. 버튼은 형식 불일치면 꺼져 있어
+        // 여기엔 키보드 리턴으로만 도달한다.
+        guard Self.isValidLinkFormat(url) else {
+            state.linkValidation = .failure(message: Self.invalidFormatMessage)
+            return .none
+        }
+        state.linkValidation = .loading
+        return .run { send in
+            await send(.inner(.linkValidated(try await jdClient.validate(url))))
+        } catch: { _, send in
+            await send(.inner(.linkValidationFailed))
+        }
+        .cancellable(id: CancelID.validate, cancelInFlight: true)
+    }
+
     private func reduceInner(_ state: inout State, _ action: Action.Inner) -> Effect<Action> {
         switch action {
-        case .validationStarted:
-            let url = trimmedLink(state)
-            // 클라이언트 1차 형식 검사 — 불일치는 서버 왕복 없이 즉시 에러. 서버 검증은 형식 통과분만 받는다.
-            guard Self.isValidLinkFormat(url) else {
-                state.linkValidation = .failure(message: Self.invalidFormatMessage)
-                return .none
-            }
-            state.linkValidation = .loading
-            return .run { send in
-                await send(.inner(.linkValidated(try await jdClient.validate(url))))
-            } catch: { _, send in
-                await send(.inner(.linkValidationFailed))
-            }
-            .cancellable(id: CancelID.validate, cancelInFlight: true)
-
         case let .linkValidated(validation):
             // HTTP 200 이어도 valid 로 성공을 판단한다 (JDClient 계약).
             guard validation.valid else {
                 state.linkValidation = .failure(message: validation.message ?? Self.fallbackErrorMessage)
                 return .none
             }
-            // 성공은 상태만 바꾼다 — 자동 진행은 없앴다. 초록 성공 필드를 확인하고
-            // «계속하기»(그때 활성된다)를 눌러 넘어간다.
+            // 성공이면 바로 다음 스텝 — 입력이 바뀌면 in-flight 가 취소되므로 지금 링크가 검증된 그 링크다.
             state.linkValidation = .success
-            return .none
+            return .send(.delegate(.continueRequested(.link(trimmedLink(state)))))
 
         case .linkValidationFailed:
             state.linkValidation = .failure(message: Self.fallbackErrorMessage)

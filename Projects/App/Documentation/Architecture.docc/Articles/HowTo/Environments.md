@@ -20,7 +20,7 @@ App Info.plist  ($(APP_ENV), $(API_BASE_URL), $(KAKAO_NATIVE_APP_KEY), …)
    Feature·Domain 은 안 본다 (Domain 은 상대 path 만 조립 — 환경 무관)
 ```
 
-> **현재 상태**: **3개 빌드 Configuration(Dev/QA/Release)** + 계별 xcconfig 연결 + Info.plist 치환(`APP_ENV`·`API_BASE_URL`·표시 이름·버전)·번들 접미사 + **계별 스킴(`Hilit-Dev`/`Hilit-QA`/`Hilit-Prod`)** — Dev(.dev)·QA(.qa)·운영이 번들 ID 가 달라 한 기기에 동시 설치된다. `API_BASE_URL` 은 `NetworkClient` 의 liveValue 가 읽는다(아래 «구현 형태»). 전 계가 `https://hilit.my` 라 앱 타겟엔 ATS 예외가 없다 — HTTP(IP 직결) 디버깅은 Example 하네스 몫이다.
+> **현재 상태**: **3개 빌드 Configuration(Dev/QA/Release)** + 계별 xcconfig 연결 + Info.plist 치환(`APP_ENV`·`API_BASE_URL`·표시 이름·버전)·번들 접미사 + **계별 스킴(`Hilit-Dev`/`Hilit-QA`/`Hilit-Prod`)** — Dev(.dev)·QA(.qa)·운영이 번들 ID 가 달라 한 기기에 동시 설치된다. `API_BASE_URL` 은 `NetworkClient` 의 liveValue 가 읽는다(아래 «구현 형태»). 전 계가 https(운영 `https://hilit.my`, Dev·QA `https://dev.hilit.my`)라 앱 타겟엔 ATS 예외가 없다 — HTTP(IP 직결) 디버깅은 Example 하네스 몫이다.
 
 ## 지금 실재하는 것 — 3 Configuration + xcconfig 연결
 

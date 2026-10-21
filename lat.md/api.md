@@ -2,12 +2,12 @@
 
 YAPP APP 1팀 백엔드(D14 API v1)와의 연동 지식. 서버 태그(AppVersion·Auth·Consent·Interview·Interview Report·JD·Job·Portfolio·User·Feedback Share·Guest Feedback)를 Domain 모듈로 1:1 미러링하고, 공통 규약(envelope·토큰)은 CoreNetwork 가 흡수한다. 인프라 계약은 [[domain.map#네트워킹 인프라]], 레이어 규칙은 [[architecture]].
 
-- Swagger: `https://hilit.my/swagger-ui/index.html`
+- Swagger: `https://hilit.my/swagger-ui/index.html` (운영) · `https://dev.hilit.my/swagger-ui/index.html` (개발)
 - 스펙 원문: `GET /v3/api-docs` (OpenAPI 3.1)
 
 ## 서버와 환경
 
-개발 서버는 `https://hilit.my` (같은 인스턴스에 `http://43.202.34.84:8080` 로 IP 직결도 가능). baseURL 은 계별 xcconfig `API_BASE_URL` → Info.plist → `NetworkClient.defaultBaseURL()` 로 흐른다 (→ DocC Environments). 서버가 단일계라 Dev·QA·Prod 가 같은 호스트를 본다.
+운영 서버는 `https://hilit.my` (같은 인스턴스에 `http://43.202.34.84:8080` 로 IP 직결도 가능), 개발 서버는 `https://dev.hilit.my`. Dev·QA 는 개발 서버, Prod 는 운영 서버를 본다. baseURL 은 계별 xcconfig `API_BASE_URL` → Info.plist → `NetworkClient.defaultBaseURL()` 로 흐른다 (→ DocC Environments).
 
 - **도메인은 반드시 https** — `http://hilit.my` 로 붙으면 Caddy 가 308 로 https 에 넘기는데, scheme 이 바뀌어 origin 이 달라지므로 URLSession 이 `Authorization` 헤더를 떼고 재요청한다 → 전 API 403(익명 취급). body 로 자격증명을 싣는 재발급만 살아남아 «토큰은 멀쩡한데 전부 403» 로 보인다.
 - ATS 전면 허용(`NSAllowsArbitraryLoads`)은 앱 타겟에서 뺐다 — 전 계가 https 라 예외가 필요 없고, 남겨 두면 App Store 심사가 사유를 요구한다. IP 직결(HTTP) 디버깅이 필요한 `feature(example:)` 하네스에만 남아 있다.
