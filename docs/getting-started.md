@@ -10,9 +10,9 @@ clone 직후 **처음 빌드까지** 그대로 따라 하면 되는 문서. (아
 
 | 도구 | 용도 | 설치 |
 |---|---|---|
-| Xcode (iOS 26 SDK) | iOS 17.0+ | App Store |
+| Xcode 26+ (iOS 26 SDK 이상) | iOS 17.0+ | App Store |
 | Homebrew | 패키지 매니저 | https://brew.sh |
-| **Tuist 4.x** | 프로젝트 생성 (필수) | `mise install` (권장 — 루트 `.mise.toml` 의 버전 핀 사용) 또는 `brew install --cask tuist` |
+| **Tuist 4.x** | 프로젝트 생성 (필수) | `mise install` (권장 — 루트 `.mise.toml` 의 버전 핀 사용) 또는 `brew install --cask tuist` (핀보다 낮은 버전이면 `brew upgrade --cask tuist`) |
 | **SwiftLint** | 빌드 시 자동 린트 (없으면 경고만, 빌드는 됨) | `brew install swiftlint` |
 | ripgrep | `make lat` 검색 가속 (선택) | `brew install ripgrep` |
 
