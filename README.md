@@ -17,8 +17,7 @@
 | 의존성 관리 | Swift Package Manager | `Tuist/Package.swift` |
 | 소셜 로그인 | [Kakao iOS SDK](https://github.com/kakao/kakao-ios-sdk) 2.22+ | |
 | 딥링크 | [ChottuLink iOS SDK](https://github.com/ConnectingDotsInfotech/chottulink-ios-sdk) 1.1.2+ | 유니버설 링크 수신 |
-| 시스템 프레임워크 | AVFoundation · Speech · AuthenticationServices · PDFKit | 녹화·음성 인식·Apple 로그인·PDF |
-| 테스트 | Swift Testing · XCTest | |
+| 
 | 최소 지원 | iOS 17.0 | |
 
 ## 아키텍처
