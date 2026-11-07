@@ -54,19 +54,26 @@ extension AppFeature {
 
     // MARK: - 진행 중(held) 면접 두 갈래 → [[app#Cross-feature Routing]]
 
-    /// [처음부터 시작] — 진행분을 **버리고** 새로. 서버에 USER_EXIT 중단을 알려 진행분 리포트
-    /// 생성을 트리거하고(차감은 리포트 성공 시 확정), 보관값을 지운다.
+    /// [처음부터 시작] — 진행분을 **버리고** 새로. **시작된 세션**이면 서버에 USER_EXIT 중단을 알려 진행분
+    /// 리포트 생성을 트리거하고(차감은 리포트 성공 시 확정), **시작 전 세션**이면 서버엔 알리지 않는다.
+    /// 어느 쪽이든 보관값을 지운다.
     func abandonHeldSession(_ sessionId: Int) -> Effect<Action> {
         .run { [heldSessionStore, interviewClient, recordingClient] send in
-            do {
-                _ = try await interviewClient.abandonSession(sessionId, .userExit)
-            } catch InterviewError.sessionAlreadyEnded {
-                // 중복 호출의 409 는 «이미 중단 완료» 라는 서버 계약이다 — 실패가 아니라 목적 달성.
-            } catch {
-                // TODO: 중단 실패 안내 미도안(토스트 자리) — 화면을 유지하고 삼킨다.
-                // 보관값은 **지우지 않는다**: 세션이 아직 서버에 살아 있어 재개 재료가 남아야 한다.
-                // 세그먼트도 남긴다 — 세션이 살아 있으면 그게 재개 재료다.
-                return
+            // 시작 전 장부(hasStarted false — 앱이 준비 화면에서 죽어 남은 것)는 서버에 알리지 않는다:
+            // USER_EXIT 는 «면접 중 이탈» 전용이고 리포트 생성(= 이용권 차감)을 트리거한다. 준비 화면
+            // 뒤로가기와 같이 로컬 폐기만 한다(2026-11-07). 장부가 비었으면(비정상) 옛 동작 그대로 본다.
+            let hasStarted = heldSessionStore.load(matching: sessionId)?.hasStarted ?? true
+            if hasStarted {
+                do {
+                    _ = try await interviewClient.abandonSession(sessionId, .userExit)
+                } catch InterviewError.sessionAlreadyEnded {
+                    // 중복 호출의 409 는 «이미 중단 완료» 라는 서버 계약이다 — 실패가 아니라 목적 달성.
+                } catch {
+                    // TODO: 중단 실패 안내 미도안(토스트 자리) — 화면을 유지하고 삼킨다.
+                    // 보관값은 **지우지 않는다**: 세션이 아직 서버에 살아 있어 재개 재료가 남아야 한다.
+                    // 세그먼트도 남긴다 — 세션이 살아 있으면 그게 재개 재료다.
+                    return
+                }
             }
             // 중단 왕복 사이에 장부가 다른 세션으로 바뀌었으면(완주·새 온보딩 완주) 남의 장부를 지우게
             // 된다 — 확인과 삭제를 한 연산으로 묶고, 세그먼트 폐기도 그 뒤에 세운다.

@@ -118,7 +118,7 @@ public struct InterviewFeature {
                       case let .ready(summaryQuestion) = readiness.questionPrep
                 else { return .none }
                 // 장부는 이미 온보딩 완주 때 열렸다(2026-08-21) — 여기서 하는 일은 **«시작했다» 로
-                // 올리는 것**뿐이다. 이 플래그가 서면 비로소 홈이 «진행 중» 카드를 그린다.
+                // 올리는 것**뿐이다. 이 플래그가 [이어서 진행] 의 목적지(시작 전이면 준비 화면, 시작 후면 세션)를 가른다.
                 // 표식은 세션 화면이 녹화를 열 때 찍고, 누적초는 백그라운드 마감마다 갱신한다
                 // ([[interview#세션]] 동결 경로).
                 //
@@ -135,11 +135,24 @@ public struct InterviewFeature {
                 return .none
 
             case .screen(.readiness(.delegate(.backRequested))):
-                // 준비 화면 뒤로가기 = 흐름 이탈. 아직 면접 전이라 서버 제출 없이 장치만 정리하고 나간다
-                // (세션은 서버에 남지만 답변 0개 — 재진입 동선은 홈의 «이어서 진행» 몫, home-account §4).
+                // 준비 화면 뒤로가기 = 흐름 이탈이자 **세션 폐기**(Android 와 동일, 2026-11-07) — 장부를
+                // 지워 홈이 «진행 중» 카드를 그리지 않게 하고, 장치만 정리하고 나간다.
+                //
+                // 서버엔 아무것도 보내지 않는다: 시작 전 세션을 닫는 호출이 계약에 없다(abandon 은
+                // IN_PROGRESS 전용 — USER_EXIT 는 리포트 생성(= 이용권 차감)을 트리거하는 «면접 중 이탈» 전용,
+                // NETWORK_DISCONNECT 는 «네트워크 단절» 전용이라 의미가 안 맞는다).
+                //
+                // 삭제는 effect 가 아니라 본문 동기 호출이다 — `.closed` 를 받은 AppFeature 가 홈 onAppear 를
+                // 보내고 홈의 held 판정은 동기 load 라, effect 안에서 지우면 홈이 옛 값을 읽어 카드를 그린다.
+                // 공용 헬퍼 `stopCaptureDevicesThenNotifyClosed` 에 넣지 않는 이유: 세션 중도 이탈(.aborted)도
+                // 그걸 거치는데 그쪽 장부는 재개 재료라 남아야 한다.
+                _ = heldSessionStore.clearIfHolding(state.sessionId)
                 return stopCaptureDevicesThenNotifyClosed()
 
             case .screen(.readiness(.delegate(.prepFailed))):
+                // 서버가 질문 준비를 FAILED 로 끝낸 세션(PRELOAD_FAILED) — 재시도도 재개도 없다. 장부를 남기면
+                // 실패 화면을 닫은 홈이 죽은 세션을 «진행 중» 카드로 그린다(탭하면 ENDED 로 정리되긴 한다).
+                _ = heldSessionStore.clearIfHolding(state.sessionId)
                 state.screen = .failure(InterviewFailureFeature.State(kind: .questionPrep))
                 return stopCaptureDevicesAndPlayback()
 
