@@ -64,8 +64,8 @@ extension AppFeature {
             return presentResumedInterview(&state, sessionId: sessionId, question: question)
 
         case let .interviewReadinessResumeResolved(sessionId):
-            // 시작 전 세션은 «되돌아가기» 다 — 같은 세션 id 로 준비 화면부터 다시 연다(새 세션을
-            // 만들지 않는다: 그게 이용권을 한 장 더 잡는 경로였다).
+            // 시작 전 세션은 «되돌아가기» 다 — 같은 세션 id 로 준비 화면부터 다시 연다(살아 있는 세션을
+            // 두고 새 세션을 하나 더 만들지 않는다).
             state.interview = InterviewFeature.State(sessionId: sessionId)
             return .none
 
@@ -269,8 +269,9 @@ extension AppFeature {
         // 도달 시점은 **백그라운드 진입 직후**다(2026-08-09 개정) — 사용자가 화면을 보고 있지 않을 때
         // 닫아야 복귀가 곧장 홈이다. 그새 세션이 끝났는지는 복귀 때 `sceneBecameActive` 가 묻는다.
         //
-        // 이탈(`closed`)은 draft·보관값을 **둘 다 보존** — 같은 입력으로 다시 시작할 수 있어야 하고,
-        // 진행 중인 세션이 그대로라 홈 [이어서 진행] 의 재개 재료다.
+        // 이탈(`closed`)은 draft 를 보존한다 — 같은 입력으로 다시 시작할 수 있어야 한다. 보관값은 **면접 중
+        // 이탈이면 보존**(진행 중인 세션이 그대로라 홈 [이어서 진행] 의 재개 재료)이고, **준비 화면 뒤로가기·
+        // 질문 준비 실패는 코디네이터가 `closed` 전에 이미 지웠다**(2026-11-07, Android 와 동일) — 여기선 가르지 않는다.
         case .presented(.delegate(.interrupted)), .presented(.delegate(.closed)):
             state.interview = nil
             return .send(.home(.view(.onAppear)))
@@ -336,9 +337,10 @@ extension AppFeature {
         // 홈은 안 태운다 — 어차피 면접에 가려지고, 갱신 시점은 면접이 끝나 돌아올 때다.
         //
         // 진행 중 보관을 **여기서** 연다(2026-08-21 복원) — 서버 세션이 생긴 바로 그 순간이다.
-        // 2026-08-18(#130)엔 이걸 시작하기 탭으로 미뤘는데, 그 사이 준비 화면에서 이탈하면 서버엔
+        // 2026-08-18(#130)엔 이걸 시작하기 탭으로 미뤘는데, 그 사이 준비 화면에서 앱이 죽으면 서버엔
         // IN_PROGRESS 가 남고 로컬엔 흔적이 없어 회수 경로(입구가 전부 `load()`)가 통째로 죽었다.
-        // 카드가 뜨던 문제는 여는 시점이 아니라 `hasStarted` 로 가린다 — 홈은 그 술어를 본다.
+        // 준비 화면 뒤로가기·질문 준비 실패는 이 장부를 지운다(2026-11-07 — Android 와 동일, 코디네이터 몫).
+        // 앱이 거기서 죽어 남은 장부는 홈 카드가 되고, `hasStarted` 는 [이어서 진행] 의 목적지만 가른다.
         //
         // effect 가 아니라 본문에서 저장한다 — `.dismiss` 의 clear 와 같은 이유로 순서가 걸린다.
         case let .presented(.delegate(.finished(sessionId))):
@@ -351,7 +353,8 @@ extension AppFeature {
                 hasStarted: false,
                 // 표식은 **찍지 않는다** — 표식의 뜻은 «이 프로세스가 세그먼트를 들고 있다» 이고,
                 // 시작 전엔 세그먼트가 없어 잃을 것이 없다. 찍으면 앱을 껐다 켠 순간 킬 클린업이
-                // 죽은 프로세스 값으로 보고 세션을 닫아, 잡힌 이용권이 회수 동선 없이 사라진다.
+                // 죽은 프로세스 값으로 보고 abandon(USER_EXIT)을 쏜다 — 한 번도 시작하지 않은 세션에
+                // 리포트 생성(= 이용권 차감)을 트리거하는 호출이다.
                 processToken: nil
             ))
             return .none
