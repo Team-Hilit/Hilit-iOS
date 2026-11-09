@@ -191,11 +191,48 @@ struct InterviewFeatureTests {
         #expect(held.value == HeldSession(sessionId: 9, recordedSeconds: 0, hasStarted: true))
     }
 
-    @Test("질문 준비 실패는 questionPrep 실패 화면으로 전환한다")
-    func prepFailedRoutesToFailure() async {
+    @Test("준비 화면 뒤로가기는 다른 세션의 장부를 건드리지 않는다")
+    func readinessBackLeavesOtherSessionsLedger() async {
+        // 확인과 삭제가 한 연산(clearIfHolding)이라 장부가 이미 다른 세션으로 바뀌었으면 그대로 둔다.
+        let other = HeldSession(sessionId: 2, recordedSeconds: 0, hasStarted: false)
+        let ledger = LockIsolated<HeldSession?>(other)
         let store = TestStore(initialState: InterviewFeature.State(sessionId: 1)) {
             InterviewFeature()
         } withDependencies: {
+            $0.heldSessionStore.clearIfHolding = { sessionId in
+                ledger.withValue { held in
+                    guard held?.sessionId == sessionId else { return false }
+                    held = nil
+                    return true
+                }
+            }
+            $0.recordingClient.stopPreview = {}
+            $0.recordingClient.discardRecording = {}
+            $0.speechClient.stopCapture = {}
+            $0.speechClient.stopPlayback = {}
+        }
+
+        await store.send(.screen(.readiness(.delegate(.backRequested))))
+        await store.receive(\.delegate.closed)
+        await store.finish()
+        #expect(ledger.value == other)
+    }
+
+    @Test("질문 준비 실패는 장부를 지우고 questionPrep 실패 화면으로 전환한다 — 죽은 세션이 홈 카드로 남지 않는다")
+    func prepFailedRoutesToFailure() async {
+        let ledger = LockIsolated<HeldSession?>(
+            HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: false)
+        )
+        let store = TestStore(initialState: InterviewFeature.State(sessionId: 1)) {
+            InterviewFeature()
+        } withDependencies: {
+            $0.heldSessionStore.clearIfHolding = { sessionId in
+                ledger.withValue { held in
+                    guard held?.sessionId == sessionId else { return false }
+                    held = nil
+                    return true
+                }
+            }
             $0.recordingClient.stopPreview = {}
             $0.recordingClient.discardRecording = {}
             $0.speechClient.stopCapture = {}
@@ -206,6 +243,7 @@ struct InterviewFeatureTests {
             $0.screen = .failure(InterviewFailureFeature.State(kind: .questionPrep))
         }
         await store.finish()
+        #expect(ledger.value == nil)
     }
 
     @Test("실패 화면 X(닫기)로 흐름을 떠날 때도 캡처 장치·재생을 정지하고 녹화를 폐기한 뒤 종료를 통보한다")
@@ -234,15 +272,26 @@ struct InterviewFeatureTests {
         #expect(recordingDiscarded.value == 1)
     }
 
-    @Test("준비 화면 뒤로가기는 캡처 장치를 정지한 뒤 상위에 종료를 통보한다 — 모달 없이 즉시 이탈")
+    @Test("준비 화면 뒤로가기는 장부를 지우고 캡처 장치를 정지한 뒤 상위에 종료를 통보한다 — 모달 없이 즉시 이탈")
     func readinessBackStopsDevicesThenNotifiesClosed() async {
         let previewStopped = LockIsolated(0)
         let captureStopped = LockIsolated(0)
         let playbackStopped = LockIsolated(0)
         let recordingDiscarded = LockIsolated(0)
+        // 온보딩 완주가 열어 둔 시작 전 장부.
+        let ledger = LockIsolated<HeldSession?>(
+            HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: false)
+        )
         let store = TestStore(initialState: InterviewFeature.State(sessionId: 1)) {
             InterviewFeature()
         } withDependencies: {
+            $0.heldSessionStore.clearIfHolding = { sessionId in
+                ledger.withValue { held in
+                    guard held?.sessionId == sessionId else { return false }
+                    held = nil
+                    return true
+                }
+            }
             $0.recordingClient.stopPreview = { previewStopped.withValue { $0 += 1 } }
             $0.recordingClient.discardRecording = { recordingDiscarded.withValue { $0 += 1 } }
             $0.speechClient.stopCapture = { captureStopped.withValue { $0 += 1 } }
@@ -251,7 +300,10 @@ struct InterviewFeatureTests {
 
         // heldSessionStore.save 미스텁 — 시작 전 이탈이 진행 중 보관을 심으면 unimplemented 가 잡는다
         // (심으면 홈이 «진행 중» 카드를 그린다 — 2026-08-18 이 화면의 회귀 지점).
+        // interviewClient 도 미스텁 — 시작 전 세션에 abandon(USER_EXIT 는 리포트=차감 트리거)을 쏘면 잡힌다.
         await store.send(.screen(.readiness(.delegate(.backRequested))))
+        // 통보(.closed)를 받기 **전에** 이미 지워져 있어야 한다 — 홈 onAppear 의 동기 load 가 옛 값을 읽지 않게.
+        #expect(ledger.value == nil)
         await store.receive(\.delegate.closed)
         await store.finish()
         #expect(previewStopped.value == 1)
