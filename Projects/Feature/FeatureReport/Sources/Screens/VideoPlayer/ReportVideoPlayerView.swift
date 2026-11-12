@@ -75,7 +75,10 @@ public struct ReportVideoPlayerView: View {
             send(.onAppear)
             startPlayback()
         }
-        .onDisappear(perform: tearDownPlayback)
+        .onDisappear {
+            tearDownPlayback()
+            deactivatePlaybackSession()
+        }
         .onChange(of: store.isPlaying) { _, isPlaying in
             isPlaying ? player?.play() : player?.pause()
         }
@@ -104,6 +107,8 @@ public struct ReportVideoPlayerView: View {
     }
 
     private func startPlayback() {
+        // 재진입·재시도까지 매번 건다 — 사이에 면접이 세션을 `.playAndRecord` 로 바꾸고 비활성화하고 나간다.
+        activatePlaybackSession()
         guard player == nil else {
             // 화면으로 되돌아온 경우 — 상태가 재생 중이면 뷰의 플레이어도 다시 돌린다
             // (`onDisappear` 에서 멈췄는데 `isPlaying` 은 그대로라 onChange 가 안 걸린다).
@@ -149,6 +154,18 @@ public struct ReportVideoPlayerView: View {
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         timeObserver = nil
         player?.pause()
+    }
+
+    /// 무음 스위치와 무관하게 면접 음성이 들리도록 `.playback` 으로 올린다 — 배경 [[report#영상 플레이어]].
+    private func activatePlaybackSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setActive(true)
+    }
+
+    /// 화면을 떠날 때만 내린다(재시도 경로 X) — 끊었던 다른 앱 오디오가 재개 신호를 받게. 플레이어는 이미 멈춘 뒤다.
+    private func deactivatePlaybackSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     private func cmTime(_ seconds: TimeInterval) -> CMTime {
