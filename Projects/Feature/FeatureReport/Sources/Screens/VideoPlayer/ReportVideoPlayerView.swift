@@ -23,6 +23,9 @@ public struct ReportVideoPlayerView: View {
     @Bindable public var store: StoreOf<ReportVideoPlayerFeature>
     @State private var player: AVPlayer?
     @State private var timeObserver: Any?
+    
+    /// 오디오 세션 전환 전용 직렬 큐 — 메인 스레드 블로킹 회피.
+    private static let audioSessionQueue = DispatchQueue(label: "hilit.report.videoPlayer.audioSession", qos: .userInitiated)
 
     public init(store: StoreOf<ReportVideoPlayerFeature>) {
         self.store = store
@@ -157,15 +160,21 @@ public struct ReportVideoPlayerView: View {
     }
 
     /// 무음 스위치와 무관하게 면접 음성이 들리도록 `.playback` 으로 올린다 — 배경 [[report#영상 플레이어]].
+    /// `setActive` 는 동기 호출이라 메인에서 부르면 UI 가 멎을 수 있다(보라색 런타임 경고) —
+    /// 전용 직렬 큐로 보낸다. 활성/비활성 호출의 순서는 같은 큐라 뒤집히지 않는다.
     private func activatePlaybackSession() {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .moviePlayback)
-        try? session.setActive(true)
+        Self.audioSessionQueue.async {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .moviePlayback)
+            try? session.setActive(true)
+        }
     }
 
     /// 화면을 떠날 때만 내린다(재시도 경로 X) — 끊었던 다른 앱 오디오가 재개 신호를 받게. 플레이어는 이미 멈춘 뒤다.
     private func deactivatePlaybackSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        Self.audioSessionQueue.async {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     private func cmTime(_ seconds: TimeInterval) -> CMTime {
