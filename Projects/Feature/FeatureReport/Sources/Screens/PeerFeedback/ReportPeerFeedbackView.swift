@@ -96,6 +96,7 @@ public struct ReportPeerFeedbackView: View {
     /// 태도 항목 5줄 — 순서는 `AttitudeAxisKind.allCases`(시선·표정·자세·손동작·목소리) 고정.
     /// 줄 사이 `HilitDivider` 는 VStack 의 자식이라 위아래로 spacing 24 를 나눠 갖는다 (Figma 실측 pitch 76).
     /// 링크가 이미 있으면 토글을 잠근다 — 항목은 생성 시점에 링크로 굳어 바꿀 수 없다.
+    /// 잠긴 토글을 탭하면 이유를 토스트로 알린다(HLT-70).
     private var axisList: some View {
         VStack(spacing: .ds(.p24)) {
             ForEach(Array(AttitudeAxisKind.allCases.enumerated()), id: \.offset) { index, axis in
@@ -132,6 +133,15 @@ public struct ReportPeerFeedbackView: View {
             }
             .toggleStyle(.hilit)
             .disabled(store.isAxisLocked)
+            // `.disabled` 는 탭을 삼킨다 — 잠긴 동안은 그 위에 탭만 받는 투명 판을 얹어 안내를 띄운다.
+            // overlay 는 `.disabled` 바깥이라 이 판은 잠기지 않는다.
+            .overlay {
+                if store.isAxisLocked {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { send(.userTappedLockedAxis) }
+                }
+            }
             .accessibilityLabel(GuestAttitudeCopy.name(for: axis))
         }
     }

@@ -23,6 +23,9 @@ public struct ReportVideoPlayerView: View {
     @Bindable public var store: StoreOf<ReportVideoPlayerFeature>
     @State private var player: AVPlayer?
     @State private var timeObserver: Any?
+    
+    /// 오디오 세션 전환 전용 직렬 큐 — 메인 스레드 블로킹 회피.
+    private static let audioSessionQueue = DispatchQueue(label: "hilit.report.videoPlayer.audioSession", qos: .userInitiated)
 
     public init(store: StoreOf<ReportVideoPlayerFeature>) {
         self.store = store
@@ -57,9 +60,6 @@ public struct ReportVideoPlayerView: View {
             if let message = store.playbackFailureMessage {
                 failure(message)
             }
-            if store.isPlaybackControlVisible {
-                playbackControls
-            }
             chrome
         }
         // 영상 풀블리드 위 투명 바(기본값) — X 는 플레이어를 닫고 리포트로 (리듀서 소유).
@@ -78,7 +78,10 @@ public struct ReportVideoPlayerView: View {
             send(.onAppear)
             startPlayback()
         }
-        .onDisappear(perform: tearDownPlayback)
+        .onDisappear {
+            tearDownPlayback()
+            deactivatePlaybackSession()
+        }
         .onChange(of: store.isPlaying) { _, isPlaying in
             isPlaying ? player?.play() : player?.pause()
         }
@@ -107,6 +110,8 @@ public struct ReportVideoPlayerView: View {
     }
 
     private func startPlayback() {
+        // 재진입·재시도까지 매번 건다 — 사이에 면접이 세션을 `.playAndRecord` 로 바꾸고 비활성화하고 나간다.
+        activatePlaybackSession()
         guard player == nil else {
             // 화면으로 되돌아온 경우 — 상태가 재생 중이면 뷰의 플레이어도 다시 돌린다
             // (`onDisappear` 에서 멈췄는데 `isPlaying` 은 그대로라 onChange 가 안 걸린다).
@@ -154,16 +159,42 @@ public struct ReportVideoPlayerView: View {
         player?.pause()
     }
 
+    /// 무음 스위치와 무관하게 면접 음성이 들리도록 `.playback` 으로 올린다 — 배경 [[report#영상 플레이어]].
+    /// `setActive` 는 동기 호출이라 메인에서 부르면 UI 가 멎을 수 있다(보라색 런타임 경고) —
+    /// 전용 직렬 큐로 보낸다. 활성/비활성 호출의 순서는 같은 큐라 뒤집히지 않는다.
+    private func activatePlaybackSession() {
+        Self.audioSessionQueue.async {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .moviePlayback)
+            try? session.setActive(true)
+        }
+    }
+
+    /// 화면을 떠날 때만 내린다(재시도 경로 X) — 끊었던 다른 앱 오디오가 재개 신호를 받게. 플레이어는 이미 멈춘 뒤다.
+    private func deactivatePlaybackSession() {
+        Self.audioSessionQueue.async {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
     private func cmTime(_ seconds: TimeInterval) -> CMTime {
         CMTime(seconds: seconds, preferredTimescale: Self.timescale)
     }
 
     // MARK: - 상단·하단 고정 요소
 
-    /// 상단 X 는 `.hilitNavigationBar` 가 얹는다 — 여기는 하단 바만 남는다.
+    /// 상단 X 는 `.hilitNavigationBar` 가 얹는다 — 여기는 재생 컨트롤과 하단 바만 남는다.
+    /// 재생 컨트롤은 화면이 아니라 «네비 바 아래 ~ 진행바 위» 사이 한가운데에 선다
+    /// (Figma 443:7852 위아래 268 대칭) — 화면 가운데에 두면 하단 바 높이만큼 아래로 처진다.
+    /// 빈 ZStack 으로 자리를 늘 잡아 둬야 컨트롤이 숨어도 하단 바가 바닥에 붙어 있다.
     private var chrome: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 0)
+            ZStack {
+                if store.isPlaybackControlVisible {
+                    playbackControls
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             if store.isBottomBarVisible {
                 bottomBar
             }

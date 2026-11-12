@@ -42,8 +42,9 @@ public struct ReportPeerFeedbackFeature {
     @ObservableState
     public struct State: Equatable {
         public let sessionId: Int
-        /// 지인에게 평가받을 태도 항목. 서버 계약은 1~5개 — 0개면 400 이라 CTA 를 `.disabled` 로 막는다.
-        public var selectedAxes: Set<AttitudeAxisKind> = []
+        /// 지인에게 평가받을 태도 항목 — 전부 켠 채 시작한다(HLT-70). 서버 계약은 1~5개 —
+        /// 0개면 400 이라 CTA 를 `.disabled` 로 막는다.
+        public var selectedAxes: Set<AttitudeAxisKind> = Set(AttitudeAxisKind.allCases)
         public var isCreating = false
         /// 공유 링크 — 생성 성공 또는 **진입·409 회수**로 채워지고, 채워진 뒤엔 항상 남는다
         /// (항목이 잠겨 재생성이 없으므로).
@@ -52,7 +53,7 @@ public struct ReportPeerFeedbackFeature {
         public var isLinkRecovered = false
         /// 떠 있는 팝업 (Figma 443:8082 · 1321:10338). 없으면 nil.
         public var popup: Popup?
-        /// 하단 토스트 문구 — 생성·회수 실패 안내 자리다(복사 완료는 팝업이 받는다).
+        /// 하단 토스트 문구 — 생성·회수 실패와 잠긴 토글 탭 안내 자리다(복사 완료는 팝업이 받는다).
         public var toast: String?
         /// 미승격 서버 에러 Alert — 도메인이 케이스로 승격하지 않은 코드의 원문 표시(임시 노출 규칙).
         @Presents public var alert: AlertState<Action.Alert>?
@@ -76,6 +77,8 @@ public struct ReportPeerFeedbackFeature {
             case onAppear
             case userTappedBack
             case userToggledAxis(AttitudeAxisKind, isOn: Bool)
+            /// 링크가 생긴 뒤 잠긴 토글을 탭했다 — 값은 그대로 두고 잠긴 이유만 토스트로 알린다.
+            case userTappedLockedAxis
             case userTappedCreateLink
             case userTappedCopyLink
         }
@@ -106,6 +109,9 @@ public struct ReportPeerFeedbackFeature {
 
     /// 복사 완료 판이 떠 있는 시간 — 이 뒤에 화면이 스스로 리포트 메인으로 나간다.
     private static let linkCopiedPopupDuration: Duration = .seconds(2)
+
+    /// 잠긴 토글 탭 안내 — 기획 HLT-70 문구 그대로.
+    static let axisLockedMessage = "링크 생성 후 조작이 불가능합니다."
 
     /// 토스트가 떠 있는 시간.
     private static let toastDuration: Duration = .seconds(2)
@@ -166,6 +172,9 @@ public struct ReportPeerFeedbackFeature {
                 state.selectedAxes.remove(axis)
             }
             return .none
+
+        case .userTappedLockedAxis:
+            return showToast(Self.axisLockedMessage, &state)
 
         case .userTappedCreateLink:
             // 항목 0개는 View 가 `.disabled` 로 막는다 — 여기 도달하면 방어만.
