@@ -48,6 +48,9 @@ enum UploadFixture {
     /// 취소 후 재조회 응답 — 서버에도 남은 게 없다.
     static let emptyList = PortfolioList(portfolios: [], replaceAvailable: true)
 
+    /// 2027-01-01 00:00 KST — 서버 `nextAvailableAt`(다음 달 1일 0시) 모양의 값.
+    static let nextMonth = Date(timeIntervalSince1970: 1_798_729_200)
+
     /// 선검증을 통과하는 작은 PDF 스텁.
     static func readableFile(
         byteCount: Int = 1024,
@@ -118,6 +121,38 @@ struct MyPageUploadTests {
             $0.portfolio = .failed(UploadFixture.pendingFile)
             $0.isPortfolioTooltipPresented = true
         }
+    }
+
+    @Test("서버가 교체 한도(REPLACEMENT_LIMIT_EXCEEDED)로 등록을 거절하면 실패 판·말풍선 대신 차단 모달 (HLT-113)")
+    func replacementLimitRejectionPresentsBlockedModal() async {
+        let store = TestStore(initialState: MyPageFeature.State()) {
+            MyPageFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.portfolioFileReader.read = { _ in UploadFixture.readableFile() }
+            $0.portfolioClient.register = { _ in
+                throw PortfolioError.replacementLimitExceeded(message: "한 달에 한 번")
+            }
+            $0.userClient.profile = { UploadFixture.profile }
+            $0.portfolioClient.list = {
+                PortfolioList(portfolios: [], replaceAvailable: false, nextAvailableAt: UploadFixture.nextMonth)
+            }
+            $0.interviewClient.reportList = { [] }
+        }
+
+        await store.send(.view(.fileSelected(UploadFixture.pickedURL))) {
+            $0.portfolio = .uploading(UploadFixture.pendingFile, progress: 0.3)
+        }
+        await store.receive(\.inner.uploadReplacementLimitExceeded) {
+            $0.portfolio = .empty
+            $0.availability.replaceAvailable = false
+            $0.presentedModal = .replaceBlocked
+        }
+        await store.receive(\.inner.entryLoaded) {
+            $0.profile = .init(profile: UploadFixture.profile)
+            $0.availability.nextReplaceAvailableAt = UploadFixture.nextMonth
+        }
+        #expect(store.state.isPortfolioTooltipPresented == false)
     }
 
     // MARK: - ③ 성공 경로

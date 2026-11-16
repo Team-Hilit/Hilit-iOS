@@ -160,8 +160,12 @@ extension MyPageFeature {
         }
     }
 
-    /// 업로드 버튼 — 이미 등록된 포트폴리오가 있으면 «교체»라 한 달 한 번 규칙을 먼저 묻는다.
+    /// 업로드 버튼 — 교체 기회부터 본다(HLT-113, 계정 단위라 빈 판이어도 막는다). 등록 판만 «교체» 를 묻는다.
     private func reduceUploadRequest(_ state: inout State) -> Effect<Action> {
+        guard state.availability.replaceAvailable else {
+            state.presentedModal = .replaceBlocked
+            return .none
+        }
         guard case .registered = state.portfolio else {
             state.isFilePickerPresented = true
             return .none
@@ -171,7 +175,7 @@ extension MyPageFeature {
             state.presentedModal = .deleteBlocked(state.isInterviewInProgress ? .interviewInProgress : .monthlyLimit)
             return .none
         }
-        state.presentedModal = state.availability.replaceAvailable ? .replaceConfirm : .replaceBlocked
+        state.presentedModal = .replaceConfirm
         return .none
     }
 
@@ -249,8 +253,13 @@ extension MyPageFeature {
                     data: file.data
                 )
                 await send(.inner(.uploadAccepted(try await portfolioClient.register(upload))))
-            } catch: { _, send in
-                await send(.inner(.uploadFailed))
+            } catch: { error, send in
+                // 교체 한도 거절은 실패 판·말풍선(반대 안내) 대신 차단 모달(HLT-113).
+                if case .replacementLimitExceeded? = error as? PortfolioError {
+                    await send(.inner(.uploadReplacementLimitExceeded))
+                } else {
+                    await send(.inner(.uploadFailed))
+                }
             }
             .cancellable(id: CancelID.upload, cancelInFlight: true)
         )
@@ -306,6 +315,13 @@ extension MyPageFeature {
 
         case let .uploadAccepted(processing), let .uploadStatusPolled(processing):
             return applyUploadProcessing(&state, processing)
+
+        case .uploadReplacementLimitExceeded:
+            guard case .uploading = state.portfolio else { return .none }
+            state.portfolio = .empty // 앞 포폴을 지웠을 수 있다 — 판은 재조회가 서버 그대로 세운다.
+            state.availability.replaceAvailable = false
+            state.presentedModal = .replaceBlocked
+            return fetchEntry()
 
         case .uploadFailed:
             guard case let .uploading(file, _) = state.portfolio else { return .none }

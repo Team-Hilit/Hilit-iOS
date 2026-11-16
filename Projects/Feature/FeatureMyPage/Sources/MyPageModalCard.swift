@@ -69,11 +69,11 @@ struct MyPageModalCard: View {
                 buttons(cancel: "취소", confirm: "업로드하기")
             }
 
-        // 날짜는 서버 `nextAvailableAt` — 없으면 날짜 없이 횟수만.
+        // HLT-113 문구 — «이번 달은 더 이상 교체할 수 없어요. 다음 가능일: N일». 날짜는 서버 `nextAvailableAt`.
         case .replaceBlocked:
             Modal(
                 "포트폴리오를\n새로 업로드할 수 없어요.",
-                subText: "한 달에 한 번만 포트폴리오를 업로드할 수 있어요.",
+                subText: "이번 달은 더 이상 교체할 수 없어요.",
                 info: availability.nextReplaceAvailableAt
                     .map { "다음 가능일: \(PortfolioAvailability.dayText($0))" }
                     ?? "이번 달 남은 기회 0번",

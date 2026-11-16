@@ -112,6 +112,18 @@ struct MyPagePortfolioTests {
         }
     }
 
+    @Test("빈 판 업로드 탭 — 교체 기회 소진이면 피커 대신 차단 모달 (HLT-113)")
+    func emptyBoardUploadTapBlockedWhenReplaceExhausted() async {
+        var state = MyPageFeature.State(portfolio: .empty)
+        state.availability = .init(replaceAvailable: false, nextReplaceAvailableAt: Self.nextMonth)
+        let store = makeStore(state)
+
+        await store.send(.view(.userTappedUploadPortfolio)) {
+            $0.presentedModal = .replaceBlocked
+        }
+        #expect(store.state.isFilePickerPresented == false)
+    }
+
     @Test("목록 응답의 다음 가능일·삭제 가능 여부를 그대로 상태에 담는다 (HLT-106)")
     func entryLoadedStoresServerAvailability() async {
         let list = PortfolioList(

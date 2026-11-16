@@ -86,7 +86,9 @@ import SwiftUI
 }
 
 #Preview("모달 — 업로드 불가") {
+    // 빈 판에서 업로드를 눌러도 이번 달 교체 기회를 썼으면 이 모달이다(HLT-113). 날짜는 서버 값.
     var state = MyPageFeature.State.filled
+    state.portfolio = .empty
     state.availability = .init(replaceAvailable: false, nextReplaceAvailableAt: Date(timeIntervalSince1970: 1_798_729_200))
     state.presentedModal = .replaceBlocked
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })

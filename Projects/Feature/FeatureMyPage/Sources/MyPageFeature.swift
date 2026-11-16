@@ -294,6 +294,8 @@ public struct MyPageFeature {
             case uploadAccepted(PortfolioProcessing)
             /// 파일 읽기·선검증·삭제·등록·폴링 중 어디서든 난 실패 — 판이 고정 안내를 그려 사유는 나르지 않는다.
             case uploadFailed
+            /// 서버가 등록을 교체 한도로 거절했다(`REPLACEMENT_LIMIT_EXCEEDED`) — 실패 판 대신 차단 모달(HLT-113).
+            case uploadReplacementLimitExceeded
             /// GET /portfolios/{id}/status 폴링 응답.
             case uploadStatusPolled(PortfolioProcessing)
             case withdrawFailed
