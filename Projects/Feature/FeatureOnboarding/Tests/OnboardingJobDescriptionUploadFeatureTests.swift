@@ -122,6 +122,25 @@ struct OnboardingJobDescriptionUploadFeatureTests {
         }
     }
 
+    @Test("검증 1일 5회 초과(429)는 전용 문구의 에러 상태가 된다")
+    func validationDailyLimitShowsDedicatedMessage() async {
+        var initialState = OnboardingJobDescriptionUploadFeature.State()
+        initialState.linkText = link
+        let store = TestStore(initialState: initialState) {
+            OnboardingJobDescriptionUploadFeature()
+        } withDependencies: {
+            $0.jdClient.validate = { _ in throw JDError.dailyLimitExceeded }
+        }
+
+        await store.send(.view(.userTappedContinue)) {
+            $0.linkValidation = .loading
+        }
+        await store.receive(\.inner.linkValidationFailed) {
+            $0.linkValidation = .failure(message: OnboardingJobDescriptionUploadFeature.dailyLimitMessage)
+        }
+        #expect(store.state.mode == .link)
+    }
+
     @Test("형식이 잘못된 링크는 계속하기가 꺼지고, 키보드 리턴은 서버 호출 없이 형식 에러를 띄운다")
     func invalidFormatFailsWithoutServerCall() async {
         let pastedBody = "백엔드 개발자 채용 — 3년 이상, 코틀린/스프링"

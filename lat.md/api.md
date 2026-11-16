@@ -123,7 +123,7 @@ JWT — Access 3시간 / Refresh 7일, Rotation(재발급 시 페어가 통째�
 
 - POST `/api/v1/jd/validate`
 - `createSession` 의 `.url` 입력은 **사전에 이 검증을 통과**해야 한다 (`JD_NOT_VALIDATED`).
-- 에러는 `JDError` 로 매핑된다 — INVALID_JD_URL → invalidURL(400), JD_VALIDATION_LIMIT_EXCEEDED → dailyLimitExceeded(429, 1일 5회 초과 → jdText 폴백 유도).
+- 에러는 `JDError` 로 매핑된다 — INVALID_JD_URL → invalidURL(400), JD_VALIDATION_LIMIT_EXCEEDED → dailyLimitExceeded(429, 1일 5회 초과 → 전용 문구, jdText 폴백 유도).
 
 ## Job
 

@@ -174,7 +174,8 @@ public struct OnboardingJobDescriptionUploadFeature {
         @CasePathable
         public enum Inner: Equatable, Sendable {
             case linkValidated(JDValidation)
-            case linkValidationFailed
+            /// 검증 호출 실패 — 사용자 노출 문구를 싣는다(429 일일 제한은 전용 문구, 그 외는 기본 문구).
+            case linkValidationFailed(message: String)
             /// 스킵 툴팁 노출 시간(3초) 경과 — 툴팁을 감춘다.
             case tooltipExpired
         }
@@ -195,6 +196,9 @@ public struct OnboardingJobDescriptionUploadFeature {
     static let fallbackErrorMessage = "링크를 분석하지 못했어요. 링크를 확인해 주세요." // TODO: 확정 카피 반영
     /// 클라이언트 1차 형식 검사 실패 문구 — 서버 왕복 전에 걸러진 경우.
     static let invalidFormatMessage = "올바른 링크 형식이 아니에요. 링크를 확인해 주세요." // TODO: 확정 카피 반영
+    /// 링크 검증 1일 5회 초과(429 `JD_VALIDATION_LIMIT_EXCEEDED`) 문구 — 서버 확정 문구와 같다(HLT-58).
+    /// 링크 검증만 막힐 뿐 «직접 입력하기» 탭은 그대로 열려 있다.
+    static let dailyLimitMessage = "공고 링크는 하루에 5번까지만 입력할 수 있어요"
     /// 스킵 툴팁 자동 소멸까지의 시간 — 진입 후 이만큼 지나면 툴팁을 감춘다.
     static let tooltipDuration: Duration = .seconds(3)
 
@@ -315,8 +319,11 @@ public struct OnboardingJobDescriptionUploadFeature {
         state.linkValidation = .loading
         return .run { send in
             await send(.inner(.linkValidated(try await jdClient.validate(url))))
-        } catch: { _, send in
-            await send(.inner(.linkValidationFailed))
+        } catch: { error, send in
+            let message = (error as? JDError) == .dailyLimitExceeded
+                ? Self.dailyLimitMessage
+                : Self.fallbackErrorMessage
+            await send(.inner(.linkValidationFailed(message: message)))
         }
         .cancellable(id: CancelID.validate, cancelInFlight: true)
     }
@@ -333,8 +340,8 @@ public struct OnboardingJobDescriptionUploadFeature {
             state.linkValidation = .success
             return .send(.delegate(.continueRequested(.link(trimmedLink(state)))))
 
-        case .linkValidationFailed:
-            state.linkValidation = .failure(message: Self.fallbackErrorMessage)
+        case let .linkValidationFailed(message):
+            state.linkValidation = .failure(message: message)
             return .none
 
         case .tooltipExpired:
