@@ -53,6 +53,11 @@ public struct InterviewFeature {
         /// 종료 신호 first-wins — 정상 종료엔 갈아탈 화면이 없어 finished 후에도 screen 이 .session 에 머문다.
         /// 늦은 두 번째 finished/aborted 를 case 가드만으로 거를 수 없어, 이 플래그가 이중 통보·재접수를 막는다.
         public var isClosing = false
+        /// 모바일 데이터 사용 응답을 기다리는 중(HLT-87) — 산출물은 이미 Wi-Fi 정책으로 큐에 접수돼 있다.
+        /// 응답(버튼·dismiss)이 오면 내리고 마무리한다 — 두 번 마무리하지 않게 하는 표식이다.
+        var isAwaitingCellularConsent = false
+        /// 모바일 데이터 업로드 확인 모달(시스템 알럿) — 셀룰러에서 면접을 마쳤을 때만 뜬다(HLT-87).
+        @Presents public var cellularUploadAlert: AlertState<Action.CellularUploadAlert>?
 
         public init(sessionId: Int) {
             self.sessionId = sessionId
@@ -70,9 +75,24 @@ public struct InterviewFeature {
     public enum Action: ViewAction {
         /// 준비 화면 복귀의 재개 판정 결과 — ENDED 만 처리한다(스펙 ③ 표).
         case resumeChecked(InterviewResumeCheck)
+        case cellularUploadAlert(PresentationAction<CellularUploadAlert>)
+        case inner(Inner)
         case screen(Screen.Action)
         case view(View)
         case delegate(Delegate)
+
+        /// 모바일 데이터 업로드 확인 모달의 선택지(HLT-87).
+        public enum CellularUploadAlert: Equatable, Sendable {
+            case userTappedUseCellular
+            case userTappedWaitForWiFi
+        }
+
+        /// effect 결과 — 리듀서 전용(D5).
+        @CasePathable
+        public enum Inner: Equatable, Sendable {
+            /// 산출물 접수(Wi-Fi 정책) 뒤 망 조회 결과 — 셀룰러면 확인 모달, 아니면 곧장 마무리.
+            case uploadNetworkChecked(isOnCellular: Bool)
+        }
 
         /// 사용자 입력·생명주기 — InterviewView(코디네이터 뷰)의 send 전용(D5).
         public enum View: Equatable, Sendable {
@@ -161,20 +181,39 @@ public struct InterviewFeature {
                 // 두 번째 통보가 도달할 수 있어, 이미 종료를 확정했으면 무시한다(업로드 재접수·이중 통보 방지).
                 guard case .session = state.screen, !state.isClosing else { return .none }
                 state.isClosing = true
-                // 산출물 소유권은 큐로 — enqueue(파일 이동+저널, 밀리초) 뒤 장치를 정지한다(스펙 ①).
+                // 녹화가 없으면 망 정책을 물을 것도 없다 — 곧장 마무리한다.
+                guard let ref else { return finishInterview(state: &state, allowsCellular: false) }
+                // 산출물 소유권부터 큐로 넘긴다 — **기본 정책(Wi-Fi 대기)으로 먼저 접수**하고 그다음 망을 본다(HLT-87).
+                // 모달을 먼저 띄우면 응답을 기다리는 동안 합성본이 녹화 보관 폴더에 남아, 그새 앱이 죽으면
+                // 다음 실행의 «끝난 세션» 정리(purge)가 업로드 없이 지운다. 허락하면 큐가 정책을 올린다.
                 // 전환 중 유일하게 `discardRecording()` 을 부르지 않는 경로다 — 파일은 이제 큐 것이다.
-                // 그다음 **리포트 채점이 끝날 때까지 기다렸다가** 홈으로 통보한다(2026-08-14) — 그동안
-                // 화면은 세션의 `LoadingModal`(isFinishing)이 그대로 덮고 있어 인디케이터가 이어진다.
-                let sessionId = state.sessionId
                 return .run { send in
-                    if let ref {
-                        await uploadQueue.enqueue(ref.sessionId, ref.fileURL, wrapUp)
-                    }
-                    await recordingClient.stopPreview()
-                    await speechClient.stopCapture()
-                    await waitForReportGeneration(sessionId: sessionId)
-                    await send(.delegate(.finished))
+                    await uploadQueue.enqueue(ref.sessionId, ref.fileURL, wrapUp, false)
+                    await send(.inner(.uploadNetworkChecked(isOnCellular: await uploadQueue.isOnCellular())))
                 }
+
+            case .inner(.uploadNetworkChecked(isOnCellular: false)):
+                return finishInterview(state: &state, allowsCellular: false)
+
+            case .inner(.uploadNetworkChecked(isOnCellular: true)):
+                state.isAwaitingCellularConsent = true
+                state.cellularUploadAlert = Self.cellularUploadAlert
+                return .none
+
+            case .cellularUploadAlert(.presented(.userTappedUseCellular)):
+                guard state.isAwaitingCellularConsent else { return .none }
+                return finishInterview(state: &state, allowsCellular: true)
+
+            case .cellularUploadAlert(.presented(.userTappedWaitForWiFi)):
+                guard state.isAwaitingCellularConsent else { return .none }
+                return finishInterview(state: &state, allowsCellular: false)
+
+            case .cellularUploadAlert(.dismiss):
+                // 버튼을 거치지 않고 닫힌 경우(시스템이 알럿을 내림 등) — 기본 정책(Wi-Fi 대기)으로 마무리한다.
+                // 버튼 탭도 presented 뒤에 dismiss 가 오지만 그때는 이미 표식이 내려가 있다. 그냥 두면
+                // 마무리가 영영 안 돌아 로딩 모달에 갇힌다.
+                guard state.isAwaitingCellularConsent else { return .none }
+                return finishInterview(state: &state, allowsCellular: false)
 
             case .screen(.session(.delegate(.aborted))):
                 // finished 와 같은 창(위 주석) — 뒤늦게 도달하면 폐기가 **큐에 넘긴 파일**을 지운다.
@@ -223,6 +262,39 @@ public struct InterviewFeature {
             case .screen, .delegate:
                 return .none
             }
+        }
+        .ifLet(\.$cellularUploadAlert, action: \.cellularUploadAlert)
+    }
+
+    /// 모바일 데이터 업로드 확인 모달(HLT-87) — 시스템 알럿. 기본(취소 역할)은 Wi-Fi 대기다(A-PRD 기본 정책).
+    /// 판정이 «expensive»(셀룰러·개인 핫스팟)라 핫스팟 Wi-Fi 에서도 뜬다 — 문구를 «Wi-Fi 아님» 이 아니라 그 기준으로 쓴다.
+    static let cellularUploadAlert = AlertState<Action.CellularUploadAlert> {
+        TextState("모바일 데이터로 영상을 업로드할까요?")
+    } actions: {
+        ButtonState(role: .cancel, action: .userTappedWaitForWiFi) {
+            TextState("Wi-Fi 연결 시 업로드")
+        }
+        ButtonState(action: .userTappedUseCellular) {
+            TextState("모바일 데이터 사용")
+        }
+    } message: {
+        TextState("지금은 모바일 데이터(또는 개인 핫스팟)로 연결되어 있어요. 면접 영상은 Wi-Fi에 연결되면 자동으로 업로드돼요.")
+    }
+
+    /// 정상 종료 마무리 — (허락받았으면 업로드를 모바일 데이터 허용으로 올리고) 장치를 정지한다(스펙 ①).
+    /// 산출물 접수는 이미 끝났다(finished 분기). 그다음 **리포트 채점이 끝날 때까지 기다렸다가** 홈으로
+    /// 통보한다(2026-08-14) — 그동안 화면은 세션의 `LoadingModal`(isFinishing)이 그대로 덮고 있어 인디케이터가 이어진다.
+    private func finishInterview(state: inout State, allowsCellular: Bool) -> Effect<Action> {
+        state.isAwaitingCellularConsent = false
+        let sessionId = state.sessionId
+        return .run { send in
+            if allowsCellular {
+                await uploadQueue.allowCellular(sessionId)
+            }
+            await recordingClient.stopPreview()
+            await speechClient.stopCapture()
+            await waitForReportGeneration(sessionId: sessionId)
+            await send(.delegate(.finished))
         }
     }
 

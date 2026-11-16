@@ -14,9 +14,25 @@ import SwiftUI
 public struct InterviewSessionView: View {
     @Bindable public var store: StoreOf<InterviewSessionFeature>
     @Environment(\.scenePhase) private var scenePhase
+    /// 모바일 데이터 업로드 확인 알럿(HLT-87) — 상태는 코디네이터 소유, 표출만 여기서 한다.
+    /// 알럿이 뜨는 때는 항상 마무리 로딩 모달(cover)이 떠 있다(산출물은 정지+합성 경로에서만 나온다).
+    /// 루트에서 띄우면 cover 와 presentation 자리를 다퉈 시스템이 알럿을 곧바로 내린다 — 그래서 cover 안에 붙인다.
+    private let cellularUploadAlert: Binding<Store<
+        AlertState<InterviewFeature.Action.CellularUploadAlert>, InterviewFeature.Action.CellularUploadAlert
+    >?>
 
     public init(store: StoreOf<InterviewSessionFeature>) {
+        self.init(store: store, cellularUploadAlert: .constant(nil))
+    }
+
+    init(
+        store: StoreOf<InterviewSessionFeature>,
+        cellularUploadAlert: Binding<Store<
+            AlertState<InterviewFeature.Action.CellularUploadAlert>, InterviewFeature.Action.CellularUploadAlert
+        >?>
+    ) {
         self.store = store
+        self.cellularUploadAlert = cellularUploadAlert
     }
 
     // 카메라 backdrop 은 InterviewView(코디네이터 뷰) 상주 — 화면 교체 시 프리뷰 레이어 재생성 방지.
@@ -50,7 +66,7 @@ public struct InterviewSessionView: View {
         .animation(.easeInOut(duration: 0.2), value: presentedModal)
         .hilitModal(item: presentedModal) { modal in
             switch modal {
-            case .finishing: LoadingModal()
+            case .finishing: LoadingModal().alert(cellularUploadAlert)
             case .exitConfirm: exitConfirmModal
             case .earlyExitWarning: earlyExitWarningModal
             }

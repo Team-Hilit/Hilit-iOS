@@ -9,6 +9,7 @@ import ComposableArchitecture
 import CoreNetworkInterface
 import DomainInterviewInterface
 import Foundation
+import Network
 import OSLog
 
 extension InterviewVideoUploadQueue: @retroactive DependencyKey {
@@ -16,9 +17,38 @@ extension InterviewVideoUploadQueue: @retroactive DependencyKey {
         // 저널·background 세션 구독이 프로세스 전역 1개여야 해 actor 를 static 으로 공유한다 —
         // AppDelegate(wake)·AppFeature(시작)·코디네이터(enqueue)가 같은 큐를 본다.
         InterviewVideoUploadQueue(
-            enqueue: { await VideoUploadQueueActor.shared.enqueue(sessionId: $0, fileURL: $1, wrapUp: $2) },
-            resumePending: { await VideoUploadQueueActor.shared.resumePending() }
+            enqueue: {
+                await VideoUploadQueueActor.shared.enqueue(sessionId: $0, fileURL: $1, wrapUp: $2, allowsCellular: $3)
+            },
+            resumePending: { await VideoUploadQueueActor.shared.resumePending() },
+            allowCellular: { await VideoUploadQueueActor.shared.allowCellular(sessionId: $0) },
+            isOnCellular: { await currentPathIsExpensive() }
         )
+    }
+}
+
+/// 현재 망 경로 1회 조회 — 모니터를 띄워 첫 경로만 받고 바로 닫는다. «expensive» = 셀룰러·개인 핫스팟
+/// (PUT 의 `allowsExpensiveNetworkAccess` 와 같은 기준이라 «물었는데 실제론 Wi-Fi 였다» 가 없다).
+/// 첫 콜백이 1초 안에 안 오면 false(= 묻지 않고 기본 정책) — 종료 흐름(로딩 모달)을 붙잡지 않는다.
+private func currentPathIsExpensive() async -> Bool {
+    let queue = DispatchQueue(label: "com.hilit.upload.path-check")
+    return await withCheckedContinuation { continuation in
+        let monitor = NWPathMonitor()
+        let resumed = LockIsolated(false)
+        // 한 번만 끝낸다 — 콜백과 타임아웃 중 먼저 온 쪽. 핸들러를 비워 모니터↔클로저 순환 참조도 끊는다.
+        let finish: @Sendable (Bool) -> Void = { isExpensive in
+            let first = resumed.withValue { done -> Bool in
+                defer { done = true }
+                return !done
+            }
+            guard first else { return }
+            monitor.pathUpdateHandler = nil
+            monitor.cancel()
+            continuation.resume(returning: isExpensive)
+        }
+        monitor.pathUpdateHandler = { path in finish(path.status == .satisfied && path.isExpensive) }
+        monitor.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + 1) { finish(false) }
     }
 }
 
@@ -46,6 +76,38 @@ actor VideoUploadQueueActor {
         let wrapUpStartSec: Double?
         let wrapUpEndSec: Double?
         let createdAt: Date
+        /// 모바일 데이터로 PUT 해도 되는가(HLT-87) — 사용자가 확인 모달에서 허락한 업로드만 true.
+        var allowsCellular: Bool
+
+        init(
+            sessionId: Int,
+            stage: Stage,
+            wrapUpStartSec: Double?,
+            wrapUpEndSec: Double?,
+            createdAt: Date,
+            allowsCellular: Bool
+        ) {
+            self.sessionId = sessionId
+            self.stage = stage
+            self.wrapUpStartSec = wrapUpStartSec
+            self.wrapUpEndSec = wrapUpEndSec
+            self.createdAt = createdAt
+            self.allowsCellular = allowsCellular
+        }
+
+        /// 정책 도입 전 저널엔 키가 없다 — 그때 접수된 업로드는 망 제한 없이 시작됐으니 **true** 로 이어 간다
+        /// (false 로 읽으면 업데이트 직후 셀룰러에서 진행 중이던 업로드가 말없이 멈춘다).
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(
+                sessionId: try container.decode(Int.self, forKey: .sessionId),
+                stage: try container.decode(Stage.self, forKey: .stage),
+                wrapUpStartSec: try container.decodeIfPresent(Double.self, forKey: .wrapUpStartSec),
+                wrapUpEndSec: try container.decodeIfPresent(Double.self, forKey: .wrapUpEndSec),
+                createdAt: try container.decode(Date.self, forKey: .createdAt),
+                allowsCellular: try container.decodeIfPresent(Bool.self, forKey: .allowsCellular) ?? true
+            )
+        }
     }
 
     /// 만료 — 이 나이를 넘긴 항목은 폐기한다(72시간, 스펙 «결정 요약» — 영상 없는 리포트가 1급 폴백).
@@ -81,7 +143,7 @@ actor VideoUploadQueueActor {
         self.now = now
     }
 
-    func enqueue(sessionId: Int, fileURL: URL, wrapUp: InterviewVideoWrapUpSpan?) async {
+    func enqueue(sessionId: Int, fileURL: URL, wrapUp: InterviewVideoWrapUpSpan?, allowsCellular: Bool) async {
         loadJournalIfNeeded()
         ensureListening()
         // dedup — 코디네이터의 늦은 중복 finished 가 업로드를 재시작하지 못한다(스펙 ①).
@@ -104,7 +166,8 @@ actor VideoUploadQueueActor {
             stage: .pending,
             wrapUpStartSec: wrapUp?.wrapUpStartSec,
             wrapUpEndSec: wrapUp?.wrapUpEndSec,
-            createdAt: now()
+            createdAt: now(),
+            allowsCellular: allowsCellular
         ))
         persistJournal()
         // 전송은 뒤에서 — enqueue 는 여기서 끝난다(코디네이터가 홈 전환 전에 await 하는 범위).
@@ -118,7 +181,7 @@ actor VideoUploadQueueActor {
         loadJournalIfNeeded()
         ensureListening()
         immediateRetryUsed.removeAll()
-        purgeExpired()
+        await purgeExpired()
         purgeOrphanFiles()
         let inFlightIds = await transfer.reattach()
         await withTaskGroup(of: Void.self) { group in
@@ -141,6 +204,21 @@ actor VideoUploadQueueActor {
 
     // MARK: - 시도
 
+    /// 모바일 데이터 허용으로 올린다(HLT-87) — 저널을 먼저 고쳐 진행 중인 시도도 새 정책으로 등록하게 하고,
+    /// 이미 Wi-Fi 를 기다리며 등록된 PUT 은 취소한 뒤 다시 시도한다. complete 단계면 PUT 이 끝났으니 할 일이 없다.
+    func allowCellular(sessionId: Int) async {
+        loadJournalIfNeeded()
+        guard let index = journal.firstIndex(where: { $0.sessionId == sessionId }),
+              !journal[index].allowsCellular
+        else { return }
+        journal[index].allowsCellular = true
+        persistJournal()
+        guard journal[index].stage == .pending else { return }
+        await transfer.cancel(String(sessionId))
+        // 시도가 진행 중(발급 대기)이면 그 시도가 고친 저널을 읽어 새 정책으로 등록한다 — 여기선 비켜 간다.
+        await attempt(sessionId)
+    }
+
     private func attempt(_ sessionId: Int) async {
         guard !attemptsInFlight.contains(sessionId),
               let entry = journal.first(where: { $0.sessionId == sessionId })
@@ -152,7 +230,11 @@ actor VideoUploadQueueActor {
             case .pending:
                 let target = try await interview.videoUploadURL(sessionId)
                 guard let url = URL(string: target.uploadUrl) else { throw NetworkError.invalidURL }
-                try await transfer.enqueuePut(String(sessionId), url, target.contentType, storedFileURL(sessionId))
+                // 정책은 등록 직전에 저널에서 다시 읽는다 — 발급 대기 중 `allowCellular` 가 올렸을 수 있다.
+                let allowsCellular = journal.first { $0.sessionId == sessionId }?.allowsCellular ?? entry.allowsCellular
+                try await transfer.enqueuePut(
+                    String(sessionId), url, target.contentType, storedFileURL(sessionId), allowsCellular
+                )
                 // 여기서 끝 — PUT 완료·실패는 completions 스트림이 잇는다(등록 프로세스가 죽어도 도착).
             case .completing:
                 try await completeAndCleanUp(entry)
@@ -264,11 +346,13 @@ actor VideoUploadQueueActor {
         }
     }
 
-    private func purgeExpired() {
+    private func purgeExpired() async {
         let cutoff = now().addingTimeInterval(-Self.maxAge)
         let expired = journal.filter { $0.createdAt < cutoff }
         guard !expired.isEmpty else { return }
         for entry in expired {
+            // Wi-Fi 를 기다리며 남은 PUT 도 걷는다 — 두면 파일이 지워진 뒤 데몬에 유령 태스크만 남는다(HLT-87).
+            await transfer.cancel(String(entry.sessionId))
             try? FileManager.default.removeItem(at: storedFileURL(entry.sessionId))
             Self.logger.notice("만료 폐기(session \(entry.sessionId)) — 72시간 초과")
         }

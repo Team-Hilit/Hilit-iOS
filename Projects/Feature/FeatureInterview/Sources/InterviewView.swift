@@ -38,7 +38,11 @@ public struct InterviewView: View {
                 if let store = store.scope(state: \.screen.readiness, action: \.screen.readiness) {
                     InterviewReadinessView(store: store)
                 } else if let store = store.scope(state: \.screen.session, action: \.screen.session) {
-                    InterviewSessionView(store: store)
+                    // 셀룰러 업로드 확인 알럿(HLT-87)은 세션의 마무리 로딩 모달 안에서 띄운다 — 그 init 주석.
+                    InterviewSessionView(
+                        store: store,
+                        cellularUploadAlert: $store.scope(state: \.cellularUploadAlert, action: \.cellularUploadAlert)
+                    )
                 } else if let store = store.scope(state: \.screen.failure, action: \.screen.failure) {
                     InterviewFailureView(store: store)
                 }

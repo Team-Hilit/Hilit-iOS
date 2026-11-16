@@ -31,7 +31,9 @@ struct InterviewFeatureTests {
         let store = TestStore(initialState: initialState) {
             InterviewFeature()
         } withDependencies: {
-            $0.interviewVideoUploadQueue.enqueue = { sessionId, fileURL, _ in
+            $0.interviewVideoUploadQueue.isOnCellular = { false }
+            $0.interviewVideoUploadQueue.enqueue = { sessionId, fileURL, _, allowsCellular in
+                #expect(!allowsCellular)   // 접수는 언제나 기본 정책(Wi-Fi 대기)으로 먼저 — 허락은 뒤에 올린다
                 enqueued.withValue { $0.append((sessionId, fileURL)) }
             }
             // 채점이 이미 끝난 응답 — 대기 없이 곧장 홈 통보로 이어진다(대기 경로는 아래 별도 테스트).
@@ -43,6 +45,7 @@ struct InterviewFeatureTests {
         await store.send(.screen(.session(.delegate(.finished(.fixture, .fixture))))) {
             $0.isClosing = true
         }
+        await store.receive(\.inner.uploadNetworkChecked)
         await store.receive(\.delegate.finished)
         await store.finish()
         #expect(enqueued.value.map(\.0) == [1])
@@ -85,7 +88,8 @@ struct InterviewFeatureTests {
                 polls.withValue { $0 += 1 }
                 return polls.value < 2 ? InterviewReportFixtures.generating : InterviewReportFixtures.ready
             }
-            $0.interviewVideoUploadQueue.enqueue = { _, _, _ in }
+            $0.interviewVideoUploadQueue.isOnCellular = { false }
+            $0.interviewVideoUploadQueue.enqueue = { _, _, _, _ in }
             $0.recordingClient.stopPreview = {}
             $0.speechClient.stopCapture = {}
         }
@@ -93,6 +97,7 @@ struct InterviewFeatureTests {
         await store.send(.screen(.session(.delegate(.finished(.fixture, .fixture))))) {
             $0.isClosing = true
         }
+        await store.receive(\.inner.uploadNetworkChecked)
         // 첫 조회가 GENERATING — 주기만큼 흐른 뒤 다시 묻고, READY 를 받고서야 종료를 올린다.
         await clock.advance(by: InterviewFeature.reportPollInterval)
         await store.receive(\.delegate.finished)
@@ -108,7 +113,8 @@ struct InterviewFeatureTests {
             InterviewFeature()
         } withDependencies: {
             $0.interviewReportClient.report = { _ in InterviewReportFixtures.ready }
-            $0.interviewVideoUploadQueue.enqueue = { _, _, _ in }
+            $0.interviewVideoUploadQueue.isOnCellular = { false }
+            $0.interviewVideoUploadQueue.enqueue = { _, _, _, _ in }
             $0.recordingClient.stopPreview = {}
             $0.speechClient.stopCapture = {}
         }
@@ -116,6 +122,7 @@ struct InterviewFeatureTests {
         await store.send(.screen(.session(.delegate(.finished(.fixture, .fixture))))) {
             $0.isClosing = true
         }
+        await store.receive(\.inner.uploadNetworkChecked)
         await store.receive(\.delegate.finished)
         // isClosing 가드 — 스텁을 최소로 유지한 채(폐기·재생 정지 미스텁) 세 신호가 조용히 무시되는지 본다.
         await store.send(.screen(.session(.delegate(.finished(nil, nil)))))

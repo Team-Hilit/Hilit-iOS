@@ -13,7 +13,8 @@ extension BackgroundTransferClient: @retroactive DependencyKey {
     public static var liveValue: BackgroundTransferClient {
         let session = BackgroundTransferSession.shared
         return BackgroundTransferClient(
-            enqueuePut: { try session.enqueuePut(id: $0, url: $1, contentType: $2, fileURL: $3) },
+            enqueuePut: { try session.enqueuePut(id: $0, url: $1, contentType: $2, fileURL: $3, allowsExpensiveNetwork: $4) },
+            cancel: { await session.cancel(id: $0) },
             completions: { session.completions },
             reattach: { await session.reattach() },
             attachBackgroundEventsCompletionHandler: { session.attach(completionHandler: $0) }
@@ -55,16 +56,25 @@ final class BackgroundTransferSession: NSObject, @unchecked Sendable {
 
     var completions: AsyncStream<BackgroundTransferCompletion> { stream }
 
-    func enqueuePut(id: String, url: URL, contentType: String, fileURL: URL) throws {
+    func enqueuePut(id: String, url: URL, contentType: String, fileURL: URL, allowsExpensiveNetwork: Bool) throws {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw NetworkError.transport(.fileDoesNotExist)
         }
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        // 망 정책은 요청 단위다 — 세션 설정은 허용으로 두고(세션은 식별자당 1개라 정책별로 못 가른다) 요청이 좁힌다.
+        // «expensive» = 셀룰러·개인 핫스팟 — Android WorkManager 의 UNMETERED 제약과 같은 기준이다(HLT-87).
+        request.allowsExpensiveNetworkAccess = allowsExpensiveNetwork
         let task = session.uploadTask(with: request, fromFile: fileURL)
         task.taskDescription = id
         task.resume()
+    }
+
+    func cancel(id: String) async {
+        for task in await session.allTasks where task.taskDescription == id {
+            task.cancel()
+        }
     }
 
     func reattach() async -> [String] {
@@ -83,6 +93,9 @@ final class BackgroundTransferSession: NSObject, @unchecked Sendable {
 extension BackgroundTransferSession: URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let id = task.taskDescription else { return }
+        // 앱이 건 취소(`cancel(id:)` — 정책 변경·만료 폐기)는 실패가 아니다 — 흘리면 큐가 재시도해 취소한 태스크를
+        // 되살린다. 강제 종료로 시스템이 취소한 태스크도 여기 걸리지만, 그쪽은 다음 실행의 저널 재개가 잇는다.
+        if (error as? URLError)?.code == .cancelled { return }
         if let error {
             continuation.yield(.failed(id: id, .transport((error as? URLError)?.code ?? .unknown)))
             return

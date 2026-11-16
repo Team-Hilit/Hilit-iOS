@@ -23,7 +23,14 @@ public struct BackgroundTransferClient: Sendable {
 
     /// presigned PUT 태스크 등록 — `id` 는 호출자의 저널 키(taskDescription 에 새겨 완료 이벤트가 들고 온다).
     /// `contentType` 은 발급 응답 원문(서명 포함 — 다르면 저장소가 거부). 파일이 없으면 즉시 throw.
-    public var enqueuePut: @Sendable (_ id: String, _ url: URL, _ contentType: String, _ fileURL: URL) async throws -> Void
+    /// `allowsExpensiveNetwork` 가 false 면 셀룰러·개인 핫스팟에선 전송하지 않고 Wi-Fi 등 비과금 망을 기다린다
+    /// (background 세션은 망이 생길 때까지 태스크를 대기시킨다 — HLT-87).
+    public var enqueuePut: @Sendable (
+        _ id: String, _ url: URL, _ contentType: String, _ fileURL: URL, _ allowsExpensiveNetwork: Bool
+    ) async throws -> Void
+    /// 그 id 의 대기·실행 중 태스크 취소 — 망 정책을 바꿔 다시 등록하거나 만료 폐기할 때(HLT-87).
+    /// 취소로 끝난 태스크는 `completions` 에 실패로 흘리지 않는다 — 취소한 쪽이 후속을 이미 들고 있다.
+    public var cancel: @Sendable (_ id: String) async -> Void
     /// 전송 완료·실패 스트림 — 단일 소비자(업로드 큐) 전제. 구독 전 이벤트는 버퍼링된다.
     public var completions: @Sendable () -> AsyncStream<BackgroundTransferCompletion>
     /// 세션 재접속 — 앱 시작·wake 시. 살아 있는(실행·대기) 태스크의 id 목록을 줘 중복 등록을 막는다.
@@ -32,12 +39,16 @@ public struct BackgroundTransferClient: Sendable {
     public var attachBackgroundEventsCompletionHandler: @Sendable (_ handler: @escaping @Sendable () -> Void) -> Void
 
     public init(
-        enqueuePut: @escaping @Sendable (_ id: String, _ url: URL, _ contentType: String, _ fileURL: URL) async throws -> Void,
+        enqueuePut: @escaping @Sendable (
+            _ id: String, _ url: URL, _ contentType: String, _ fileURL: URL, _ allowsExpensiveNetwork: Bool
+        ) async throws -> Void,
+        cancel: @escaping @Sendable (_ id: String) async -> Void,
         completions: @escaping @Sendable () -> AsyncStream<BackgroundTransferCompletion>,
         reattach: @escaping @Sendable () async -> [String],
         attachBackgroundEventsCompletionHandler: @escaping @Sendable (_ handler: @escaping @Sendable () -> Void) -> Void
     ) {
         self.enqueuePut = enqueuePut
+        self.cancel = cancel
         self.completions = completions
         self.reattach = reattach
         self.attachBackgroundEventsCompletionHandler = attachBackgroundEventsCompletionHandler
@@ -49,6 +60,7 @@ extension BackgroundTransferClient: TestDependencyKey {
     public static var testValue: BackgroundTransferClient {
         BackgroundTransferClient(
             enqueuePut: unimplemented("BackgroundTransferClient.enqueuePut"),
+            cancel: unimplemented("BackgroundTransferClient.cancel"),
             completions: unimplemented(
                 "BackgroundTransferClient.completions",
                 placeholder: AsyncStream { $0.finish() }
@@ -61,7 +73,8 @@ extension BackgroundTransferClient: TestDependencyKey {
     /// Preview 용 — 전송 없이 조용히 통과.
     public static var previewValue: BackgroundTransferClient {
         BackgroundTransferClient(
-            enqueuePut: { _, _, _, _ in },
+            enqueuePut: { _, _, _, _, _ in },
+            cancel: { _ in },
             completions: { AsyncStream { $0.finish() } },
             reattach: { [] },
             attachBackgroundEventsCompletionHandler: { _ in }

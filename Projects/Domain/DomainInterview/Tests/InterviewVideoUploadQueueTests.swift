@@ -22,6 +22,8 @@ struct InterviewVideoUploadQueueTests {
         let directory: URL
         let issueCalls = LockIsolated<[Int]>([])
         let putCalls = LockIsolated<[String]>([])
+        let putAllowsExpensive = LockIsolated<[Bool]>([])
+        let cancelCalls = LockIsolated<[String]>([])
         let completeCalls = LockIsolated<[Int]>([])
         let completedWrapUps = LockIsolated<[InterviewVideoWrapUpSpan?]>([])
         let issueFailuresRemaining = LockIsolated(0)
@@ -64,7 +66,11 @@ struct InterviewVideoUploadQueueTests {
                 completedWrapUps.withValue { $0.append(wrapUp) }
             }
             let transfer = BackgroundTransferClient(
-                enqueuePut: { [putCalls] id, _, _, _ in putCalls.withValue { $0.append(id) } },
+                enqueuePut: { [putCalls, putAllowsExpensive] id, _, _, _, allowsExpensive in
+                    putCalls.withValue { $0.append(id) }
+                    putAllowsExpensive.withValue { $0.append(allowsExpensive) }
+                },
+                cancel: { [cancelCalls] id in cancelCalls.withValue { $0.append(id) } },
                 completions: { stream },
                 reattach: { [reattachIds] in reattachIds.value },
                 attachBackgroundEventsCompletionHandler: { _ in }
@@ -103,7 +109,8 @@ struct InterviewVideoUploadQueueTests {
 
         await harness.queue.enqueue(
             sessionId: 7, fileURL: source,
-            wrapUp: InterviewVideoWrapUpSpan(wrapUpStartSec: 500, wrapUpEndSec: 512)
+            wrapUp: InterviewVideoWrapUpSpan(wrapUpStartSec: 500, wrapUpEndSec: 512),
+            allowsCellular: false
         )
 
         // enqueue 반환 시점 보장분 — 파일 이동 + 저널(pending).
@@ -124,7 +131,8 @@ struct InterviewVideoUploadQueueTests {
         let source = try harness.makeRecordingFile()
         await harness.queue.enqueue(
             sessionId: 7, fileURL: source,
-            wrapUp: InterviewVideoWrapUpSpan(wrapUpStartSec: 500, wrapUpEndSec: 512)
+            wrapUp: InterviewVideoWrapUpSpan(wrapUpStartSec: 500, wrapUpEndSec: 512),
+            allowsCellular: false
         )
         try await harness.waitUntil("PUT 등록") { harness.putCalls.value == ["7"] }
 
@@ -142,11 +150,11 @@ struct InterviewVideoUploadQueueTests {
     @Test("같은 sessionId 재접수는 무시한다 — 늦은 중복 종료 통보가 업로드를 재시작하지 못한다")
     func duplicateEnqueueIsIgnored() async throws {
         let harness = Harness()
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("첫 발급") { harness.issueCalls.value == [7] }
 
         let second = try harness.makeRecordingFile()
-        await harness.queue.enqueue(sessionId: 7, fileURL: second, wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: second, wrapUp: nil, allowsCellular: false)
 
         let entries = await harness.queue.entriesSnapshot()
         #expect(entries.count == 1)
@@ -157,7 +165,7 @@ struct InterviewVideoUploadQueueTests {
     @Test("wrapUp 이 nil 이면 complete 도 nil 로 보낸다 — 바디 생략 경로")
     func nilWrapUpRoundTrips() async throws {
         let harness = Harness()
-        await harness.queue.enqueue(sessionId: 9, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 9, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("PUT 등록") { harness.putCalls.value == ["9"] }
 
         harness.transferCompletions.yield(.completed(id: "9"))
@@ -171,7 +179,7 @@ struct InterviewVideoUploadQueueTests {
         let harness = Harness()
         harness.issueFailuresRemaining.setValue(2)   // 1차·재시도 모두 실패
 
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
 
         try await harness.waitUntil("발급 2회(1차+즉시 재시도)") { harness.issueCalls.value == [7, 7] }
         try await Task.sleep(nanoseconds: 50_000_000)   // 추가 시도가 없음을 잠깐 관찰
@@ -185,7 +193,7 @@ struct InterviewVideoUploadQueueTests {
     func resumeRetriesParkedEntry() async throws {
         let harness = Harness()
         harness.issueFailuresRemaining.setValue(2)
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("파킹") { harness.issueCalls.value == [7, 7] }
 
         await harness.queue.resumePending()
@@ -200,7 +208,7 @@ struct InterviewVideoUploadQueueTests {
         // 3회 실패 주입: 1차·즉시 재시도(파킹까지) + 재개 직후 1회 → 네 번째 발급이 성공한다.
         // 재시도권 리셋이 없으면 재개 직후 실패에서 `retryOnceOrPark` 가 거부해 네 번째가 아예 없다.
         harness.issueFailuresRemaining.setValue(3)
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("1+1 소진") { harness.issueCalls.value == [7, 7] }
         // 파킹 확정까지 기다린다 — 발급 기록은 호출 *시작* 시점이라 이 신호만으론 재시도가 아직 진행 중일 수 있고,
         // 시도 도중에 resume 이 겹치면 되살린 재시도권이 아니라 in-flight 가드를 관측하게 된다.
@@ -220,7 +228,7 @@ struct InterviewVideoUploadQueueTests {
     @Test("resumePending 은 PUT 이 데몬에 살아 있는 항목을 재등록하지 않는다")
     func resumeSkipsInFlightPut() async throws {
         let harness = Harness()
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("PUT 등록") { harness.putCalls.value == ["7"] }
         harness.reattachIds.setValue(["7"])   // 데몬에 살아 있는 태스크로 보고
 
@@ -236,7 +244,8 @@ struct InterviewVideoUploadQueueTests {
         harness.completeFailuresRemaining.setValue(2)   // PUT 완료 후 complete 1차+재시도 실패 → completing 파킹
         await harness.queue.enqueue(
             sessionId: 7, fileURL: try harness.makeRecordingFile(),
-            wrapUp: InterviewVideoWrapUpSpan(wrapUpStartSec: 1, wrapUpEndSec: 2)
+            wrapUp: InterviewVideoWrapUpSpan(wrapUpStartSec: 1, wrapUpEndSec: 2),
+            allowsCellular: false
         )
         try await harness.waitUntil("PUT 등록") { harness.putCalls.value == ["7"] }
         harness.transferCompletions.yield(.completed(id: "7"))
@@ -262,7 +271,7 @@ struct InterviewVideoUploadQueueTests {
     func resumeReturnsOnlyAfterImmediateRetryCompletes() async throws {
         let harness = Harness()
         harness.completeFailuresRemaining.setValue(2)   // 스트림발 complete 1+1 모두 실패 → completing 파킹
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("PUT 등록") { harness.putCalls.value == ["7"] }
         harness.transferCompletions.yield(.completed(id: "7"))
         try await harness.waitUntil("completing 파킹(complete 1+1 소진)") {
@@ -284,7 +293,7 @@ struct InterviewVideoUploadQueueTests {
     func resumePurgesExpiredEntries() async throws {
         let clock = LockIsolated(Date(timeIntervalSince1970: 0))
         let harness = Harness(now: { clock.value })
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("접수") { !harness.issueCalls.value.isEmpty }
         clock.setValue(Date(timeIntervalSince1970: VideoUploadQueueActor.maxAge + 1))
         let issuesBefore = harness.issueCalls.value
@@ -303,7 +312,7 @@ struct InterviewVideoUploadQueueTests {
         let harness = Harness()
         // 발급 1+1 을 모두 실패시켜 pending 으로 파킹 — 저널에 남은 «진행 중» 항목을 만든다.
         harness.issueFailuresRemaining.setValue(2)
-        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil)
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await harness.waitUntil("파킹") { harness.issueCalls.value == [7, 7] }
         // 완주 도중(저널 제거 후 파일 삭제 전) 죽은 흔적 — 대응 항목 없는 mp4.
         let orphan = harness.storedFileURL(99)
@@ -322,7 +331,7 @@ struct InterviewVideoUploadQueueTests {
         // 1세대 — 발급 1+1 이 모두 실패해 pending 으로 파킹된 채 프로세스가 끝난 상황.
         let first = Harness(directory: directory)
         first.issueFailuresRemaining.setValue(2)
-        await first.queue.enqueue(sessionId: 7, fileURL: try first.makeRecordingFile(), wrapUp: nil)
+        await first.queue.enqueue(sessionId: 7, fileURL: try first.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
         try await first.waitUntil("1세대 파킹") { first.issueCalls.value == [7, 7] }
 
         // 2세대 — 메모리를 하나도 물려받지 않는 새 actor + 새 스텁 한 벌. 아는 것은 디렉토리뿐이라
@@ -338,5 +347,79 @@ struct InterviewVideoUploadQueueTests {
         #expect(entries.first?.stage == .pending)
         #expect(first.issueCalls.value == [7, 7])   // 1세대 스텁은 더 불리지 않는다 = 진짜 새 인스턴스
         #expect(FileManager.default.fileExists(atPath: second.storedFileURL(7).path))   // 산출물도 함께 살아남는다
+    }
+
+    // MARK: - 망 정책(HLT-87)
+
+    @Test("기본 접수는 과금 망(셀룰러) PUT 을 막는다 — Wi-Fi 를 기다린다")
+    func defaultEnqueueBlocksExpensiveNetwork() async throws {
+        let harness = Harness()
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
+        try await harness.waitUntil("PUT 등록") { harness.putCalls.value == ["7"] }
+        #expect(harness.putAllowsExpensive.value == [false])
+        #expect(await harness.queue.entriesSnapshot().first?.allowsCellular == false)
+    }
+
+    @Test("모바일 데이터를 허락한 접수는 셀룰러로도 PUT 한다 — 재실행 재개에도 정책이 이어진다")
+    func cellularConsentSurvivesRelaunch() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("upload-queue-tests-\(UUID().uuidString)", isDirectory: true)
+        let first = Harness(directory: directory)
+        first.issueFailuresRemaining.setValue(2)   // 1+1 실패로 파킹 — 재개가 이어받게 한다
+        await first.queue.enqueue(sessionId: 7, fileURL: try first.makeRecordingFile(), wrapUp: nil, allowsCellular: true)
+        try await first.waitUntil("1세대 파킹") { first.issueCalls.value == [7, 7] }
+
+        let second = Harness(directory: directory)
+        await second.queue.resumePending()
+
+        try await second.waitUntil("재개 PUT") { second.putCalls.value == ["7"] }
+        #expect(second.putAllowsExpensive.value == [true])
+    }
+
+    @Test("allowCellular 는 저널을 올리고 Wi-Fi 를 기다리던 PUT 을 취소한 뒤 셀룰러 허용으로 다시 등록한다")
+    func allowCellularCancelsAndReRegisters() async throws {
+        let harness = Harness()
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
+        try await harness.waitUntil("Wi-Fi 정책 PUT 등록") { harness.putCalls.value == ["7"] }
+
+        await harness.queue.allowCellular(sessionId: 7)
+
+        #expect(harness.cancelCalls.value == ["7"])
+        #expect(harness.putAllowsExpensive.value == [false, true])
+        #expect(await harness.queue.entriesSnapshot().first?.allowsCellular == true)
+    }
+
+    @Test("이미 허용됐거나 PUT 이 끝난(completing) 항목엔 allowCellular 가 아무것도 하지 않는다")
+    func allowCellularIsNoOpWhenNotNeeded() async throws {
+        let harness = Harness()
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: true)
+        try await harness.waitUntil("PUT 등록") { harness.putCalls.value == ["7"] }
+        await harness.queue.allowCellular(sessionId: 7)
+        await harness.queue.allowCellular(sessionId: 99)   // 없는 항목
+        #expect(harness.cancelCalls.value.isEmpty)
+        #expect(harness.putCalls.value == ["7"])
+    }
+
+    @Test("72시간 만료 폐기는 대기 중인 PUT 도 취소한다 — 데몬에 유령 태스크를 남기지 않는다")
+    func expiryCancelsWaitingPut() async throws {
+        let clock = LockIsolated(Date(timeIntervalSince1970: 1_000_000))
+        let harness = Harness(now: { clock.value })
+        harness.issueFailuresRemaining.setValue(2)   // 파킹 — 재개 시점에 만료 판정만 보게
+        await harness.queue.enqueue(sessionId: 7, fileURL: try harness.makeRecordingFile(), wrapUp: nil, allowsCellular: false)
+        try await harness.waitUntil("파킹") { harness.issueCalls.value == [7, 7] }
+
+        clock.setValue(Date(timeIntervalSince1970: 1_000_000 + VideoUploadQueueActor.maxAge + 1))
+        await harness.queue.resumePending()
+
+        #expect(harness.cancelCalls.value == ["7"])
+        #expect(await harness.queue.entriesSnapshot().isEmpty)
+    }
+
+    // 정책 도입 전 빌드가 남긴 저널 — 그땐 망 제한 없이 시작했으니 업데이트 직후에도 같은 조건으로 잇는다.
+    @Test("allowsCellular 키가 없는 옛 저널 항목은 true 로 읽는다")
+    func legacyJournalEntryAllowsCellular() throws {
+        let legacy = Data(#"{"sessionId":7,"stage":"pending","createdAt":0}"#.utf8)
+        let entry = try JSONDecoder().decode(VideoUploadQueueActor.JournalEntry.self, from: legacy)
+        #expect(entry.allowsCellular)
     }
 }
