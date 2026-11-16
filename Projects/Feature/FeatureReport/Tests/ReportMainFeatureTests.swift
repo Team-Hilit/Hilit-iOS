@@ -16,15 +16,32 @@ import Testing
 
 @MainActor
 struct ReportMainFeatureTests {
+    /// `video/expiry` 를 받은 시각 — 남은 초를 만료 시각으로 바꾸는 기준.
+    private nonisolated static let now = Date(timeIntervalSince1970: 1_780_000_000)
+    /// 기본 `video/expiry` 응답 — 서버가 다시 계산한 남은 시간 1시간.
+    private nonisolated static let expiry = InterviewVideoExpiry(expiresInSeconds: 3600, expired: false)
+
     private func store(
         report: @escaping @Sendable (Int) async throws -> InterviewReport,
+        videoExpiry: @escaping @Sendable (Int) async throws -> InterviewVideoExpiry = { _ in Self.expiry },
         clock: TestClock<Duration>
     ) -> TestStore<ReportMainFeature.State, ReportMainFeature.Action> {
         TestStore(initialState: ReportMainFeature.State(sessionId: 1)) {
             ReportMainFeature()
         } withDependencies: {
             $0.interviewReportClient.report = report
+            $0.interviewReportClient.videoExpiry = videoExpiry
             $0.continuousClock = clock
+            $0.date = .constant(Self.now)
+        }
+    }
+
+    /// 재생할 영상이 있는 보고서를 받으면 뒤따르는 `video/expiry` 응답 — 기본값(1시간)을 만료 시각으로 싣는다.
+    private func receiveVideoExpiry(
+        _ store: TestStore<ReportMainFeature.State, ReportMainFeature.Action>
+    ) async {
+        await store.receive(\.inner.videoExpiryLoaded) {
+            $0.videoExpiresAt = Self.now.addingTimeInterval(3600)
         }
     }
 
@@ -49,6 +66,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
     }
 
     @Test("보고서 미생성(404)은 에러가 아니라 폴링 대상이다")
@@ -160,6 +178,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
 
         await store.send(.view(.userPulledToRefresh))
         await store.receive(\.inner.reportRefreshFailed) {
@@ -255,6 +274,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
 
         await store.send(.view(.userTappedHighlight(cardIndex: 0, spanIndex: 0))) {
             $0.highlightDetail = ReportHighlightDetailFeature.State(
@@ -278,6 +298,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
 
         await store.send(.view(.userTappedHighlight(cardIndex: 99, spanIndex: 0)))
         await store.send(.view(.userTappedHighlight(cardIndex: 0, spanIndex: 99)))
@@ -332,6 +353,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
 
         await store.send(.view(.userTappedQuestionTab(1))) {
             $0.selectedCardIndex = 1
@@ -351,6 +373,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
         await store.send(.view(.userTappedQuestionTab(1))) {
             $0.selectedCardIndex = 1
         }
@@ -359,6 +382,8 @@ struct ReportMainFeatureTests {
         await store.send(.inner(.reportLoaded(InterviewReportFixtures.lowResolutionOnly))) {
             $0.report = InterviewReportFixtures.lowResolutionOnly
             $0.selectedCardIndex = 0
+            // 영상이 사라진 응답이라 남은 시간도 함께 비운다.
+            $0.videoExpiresAt = nil
         }
     }
 
@@ -372,6 +397,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.withRedFlags
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
         #expect(store.state.hasDetailReportNotices)
 
         // 시안이 느낌표·툴팁을 함께 띄우므로 기본이 펼침이다 — 첫 탭이 접는 쪽이고,
@@ -390,10 +416,13 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.withRedFlags
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
 
         await store.send(.view(.userTappedRedFlagTooltip)) { $0.isRedFlagTooltipVisible = false }
         // 재진입 — 보고서도 툴팁도 그대로다. 툴팁은 State 가 새로 만들어질 때만 다시 뜬다.
         await store.send(.view(.onAppear))
+        // 남은 시간만 다시 묻는다(같은 값이라 State 는 그대로).
+        await store.receive(\.inner.videoExpiryLoaded)
         #expect(!store.state.isRedFlagTooltipVisible)
     }
 
@@ -407,6 +436,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.withGuestFeedback
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
         #expect(store.state.hasGuestFeedback)
 
         await store.send(.view(.userTappedAttitudeComment(axisCode: "EXPRESSION"))) {
@@ -431,6 +461,7 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.withGuestFeedback
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
 
         await store.send(.view(.userTappedAttitudeComment(axisCode: "GAZE"))) {
             $0.expandedCommentAxes = ["GAZE"]
@@ -455,7 +486,9 @@ struct ReportMainFeatureTests {
             ReportMainFeature()
         } withDependencies: {
             $0.interviewReportClient.report = { _ in responses.withValue { $0.removeFirst() } }
+            $0.interviewReportClient.videoExpiry = { _ in Self.expiry }
             $0.continuousClock = clock
+            $0.date = .constant(Self.now)
         }
 
         await store.send(.view(.userTappedReload)) {
@@ -473,19 +506,27 @@ struct ReportMainFeatureTests {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
     }
 
     @Test("당겨서 새로고침은 한 번만 재조회하고 보던 상태를 지키며 폴링을 되살리지 않는다")
     func pullToRefreshFetchesOnce() async {
         let clock = TestClock()
         let responses = LockIsolated([InterviewReportFixtures.ready, InterviewReportFixtures.withGuestFeedback])
-        let store = store(report: { _ in responses.withValue { $0.removeFirst() } }, clock: clock)
+        // 그사이 지인 링크 생성(+48h)으로 서버가 기한을 다시 계산했다.
+        let expiries = LockIsolated([Self.expiry, InterviewVideoExpiry(expiresInSeconds: 3600 + 172_800, expired: false)])
+        let store = store(
+            report: { _ in responses.withValue { $0.removeFirst() } },
+            videoExpiry: { _ in expiries.withValue { $0.removeFirst() } },
+            clock: clock
+        )
 
         await store.send(.view(.onAppear))
         await store.receive(\.inner.reportLoaded) {
             $0.report = InterviewReportFixtures.ready
             $0.loadState = .loaded
         }
+        await receiveVideoExpiry(store)
         await store.send(.view(.userTappedQuestionTab(1))) { $0.selectedCardIndex = 1 }
         await store.send(.view(.userTappedRedFlagTooltip)) { $0.isRedFlagTooltipVisible = false }
 
@@ -493,6 +534,10 @@ struct ReportMainFeatureTests {
         await store.send(.view(.userPulledToRefresh))
         await store.receive(\.inner.reportRefreshed) {
             $0.report = InterviewReportFixtures.withGuestFeedback
+        }
+        // 새로고침은 남은 시간도 다시 묻는다 — 늘어난 기한이 카운트다운에 반영된다.
+        await store.receive(\.inner.videoExpiryLoaded) {
+            $0.videoExpiresAt = Self.now.addingTimeInterval(3600 + 172_800)
         }
         // 보던 카드와 접어 둔 툴팁은 그대로다 — 새로고침은 `onAppear` 가 아니다.
         #expect(store.state.selectedCardIndex == 1)
@@ -502,6 +547,95 @@ struct ReportMainFeatureTests {
         #expect(store.state.report == InterviewReportFixtures.withGuestFeedback)
         // 폴링은 되살아나지 않는다 — 시간이 흘러도 재조회 액션이 없다.
         await clock.advance(by: ReportMainFeature.pollInterval)
+    }
+
+    @Test("영상 남은 시간 조회가 실패하면 카운트다운을 숨기고 재생은 막지 않는다")
+    func videoExpiryFailureHidesCountdown() async {
+        let clock = TestClock()
+        let store = store(
+            report: { _ in InterviewReportFixtures.ready },
+            videoExpiry: { _ in throw InterviewReportError.videoNotFound },
+            clock: clock
+        )
+
+        await store.send(.view(.onAppear))
+        await store.receive(\.inner.reportLoaded) {
+            $0.report = InterviewReportFixtures.ready
+            $0.loadState = .loaded
+        }
+        // 보고서의 `video.expiresAt` 으로 대신 세지 않는다 — 서버 값이 없으면 숨긴다(HLT-44).
+        await store.receive(\.inner.videoExpiryFailed)
+        #expect(store.state.videoExpiresAt == nil)
+        #expect(store.state.playableVideoURL != nil)
+    }
+
+    @Test("재진입 때 남은 시간 재조회가 실패해도 이미 받은 서버 값은 지우지 않는다")
+    func videoExpiryRefetchFailureKeepsValue() async {
+        let clock = TestClock()
+        let calls = LockIsolated(0)
+        let store = store(
+            report: { _ in InterviewReportFixtures.ready },
+            videoExpiry: { _ in
+                let isFirst = calls.withValue { count -> Bool in
+                    count += 1
+                    return count == 1
+                }
+                guard isFirst else { throw InterviewReportError.networkFailure }
+                return Self.expiry
+            },
+            clock: clock
+        )
+
+        await store.send(.view(.onAppear))
+        await store.receive(\.inner.reportLoaded) {
+            $0.report = InterviewReportFixtures.ready
+            $0.loadState = .loaded
+        }
+        await receiveVideoExpiry(store)
+
+        // 기한은 늘기만 한다 — 옛 값은 하한이라 숨기지 않고 둔다.
+        await store.send(.view(.onAppear))
+        await store.receive(\.inner.videoExpiryFailed)
+        #expect(store.state.videoExpiresAt == Self.now.addingTimeInterval(3600))
+    }
+
+    @Test("영상 남은 시간 조회가 만료를 알리면 보고서가 살아 있어도 재생 대상에서 뺀다")
+    func videoExpiryExpiredBlocksPlayback() async {
+        let clock = TestClock()
+        let store = store(
+            report: { _ in InterviewReportFixtures.ready },
+            videoExpiry: { _ in InterviewVideoExpiry(expiresInSeconds: 0, expired: true) },
+            clock: clock
+        )
+
+        await store.send(.view(.onAppear))
+        await store.receive(\.inner.reportLoaded) {
+            $0.report = InterviewReportFixtures.ready
+            $0.loadState = .loaded
+        }
+        await store.receive(\.inner.videoExpiryLoaded) {
+            $0.isVideoExpiredByServer = true
+        }
+        #expect(store.state.playableVideoURL == nil)
+        // 만료된 영상은 다시 묻지 않는다 — 재진입에도 조회 effect 가 없다.
+        await store.send(.view(.onAppear))
+    }
+
+    @Test("재생할 영상이 없으면 남은 시간을 묻지 않는다")
+    func noPlayableVideoSkipsExpiry() async {
+        let clock = TestClock()
+        // 기본 store 의 videoExpiry 를 unimplemented 로 덮는다 — 불리면 테스트가 실패한다.
+        let store = store(
+            report: { _ in InterviewReportFixtures.insufficientAnalysis },
+            videoExpiry: unimplemented("InterviewReportClient.videoExpiry"),
+            clock: clock
+        )
+
+        await store.send(.view(.onAppear))
+        await store.receive(\.inner.reportLoaded) {
+            $0.report = InterviewReportFixtures.insufficientAnalysis
+            $0.loadState = .loaded
+        }
     }
 
     @Test("지인 피드백이 없으면 요청 카드를 보여준다")

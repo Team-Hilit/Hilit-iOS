@@ -101,7 +101,7 @@ public struct ReportMainView: View {
     private var videoSection: some View {
         VStack(alignment: .leading, spacing: .ds(.p12)) {
             VideoCountdownCard(
-                expiresAt: store.report?.video?.expiresAt,
+                expiresAt: store.videoExpiresAt,
                 isExpired: store.playableVideoURL == nil,
                 onTap: { send(.userTappedWatchVideo) }
             )
@@ -370,6 +370,11 @@ private func reportMainPreview(
             ReportMainFeature()
         } withDependencies: {
             $0.interviewReportClient.report = { _ in report }
+            // 카운트다운은 `video/expiry` 만 본다 — 프리뷰 영상의 `expiresAt` 을 잔여초로 돌려 같은 시각을 낸다.
+            $0.interviewReportClient.videoExpiry = { _ in
+                let remaining = max(0, Int(video.expiresAt?.timeIntervalSinceNow ?? 0))
+                return InterviewVideoExpiry(expiresInSeconds: remaining, expired: remaining == 0)
+            }
         }
     )
 }

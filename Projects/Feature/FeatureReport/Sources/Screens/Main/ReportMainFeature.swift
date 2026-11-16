@@ -50,6 +50,12 @@ public struct ReportMainFeature {
         /// 시트와 push 를 동시에 띄울 수 없어 잠깐 옆에 둔다. 플레이어 상단 X 로 나오면 코디네이터가 비운다
         /// (X 는 리포트 메인까지, 하단 버튼은 시트까지 — 사용자 결정 2026-08-06).
         public var stashedHighlightDetail: ReportHighlightDetailFeature.State?
+        /// 영상 만료 시각 — `GET …/video/expiry` 의 잔여초를 받은 시각에 더해 환산한 값(HLT-44).
+        /// 보존 기한은 서버가 사건마다 다시 계산하므로 클라는 세지 않고 이 값만 보여준다.
+        /// nil = 아직 못 받았거나 조회 실패 → 카운트다운을 숨긴다(보고서 `video.expiresAt` 으로 대체하지 않는다).
+        public var videoExpiresAt: Date?
+        /// `video/expiry` 가 만료(`expired == true`)를 알렸다 — 보고서가 아직 살아 있다고 해도 재생 대상에서 뺀다.
+        public var isVideoExpiredByServer = false
 
         public enum LoadState: Equatable, Sendable {
             /// 최초 조회 전 또는 채점 진행 중
@@ -109,6 +115,10 @@ public struct ReportMainFeature {
             case reportRefreshFailed(InterviewReportError)
             /// 폴링 주기 경과 — 재조회 시점.
             case pollTicked
+            /// `video/expiry` 응답 — 서버가 다시 계산한 남은 시간.
+            case videoExpiryLoaded(InterviewVideoExpiry)
+            /// `video/expiry` 실패 — 받은 값이 없으면 카운트다운을 숨긴 채 둔다(재생 가능 여부는 보고서 판정 그대로).
+            case videoExpiryFailed
         }
 
         /// 코디네이터 통보. 화면 push 여부는 코디네이터가 판단한다 (D1).
@@ -122,10 +132,11 @@ public struct ReportMainFeature {
         }
     }
 
-    private enum CancelID { case poll }
+    private enum CancelID { case poll, videoExpiry }
 
     @Dependency(\.interviewReportClient) var interviewReportClient
     @Dependency(\.continuousClock) var clock
+    @Dependency(\.date.now) var now
 
     public init() {}
 
@@ -166,7 +177,8 @@ public struct ReportMainFeature {
         case .onAppear:
             // 툴팁은 State 초기값으로 한 번 띄운다 — 접으면 이 State 가 사는 동안 다시 안 띄운다.
             // 재진입(뒤로가기 복귀)에는 이미 받아둔 보고서를 그대로 쓴다.
-            guard state.report == nil else { return .none }
+            // 남은 시간만은 다시 묻는다 — 지인 링크 생성(+48h) 같은 사건이 그사이 기한을 늘렸을 수 있다.
+            guard state.report == nil else { return fetchVideoExpiry(state) }
             return fetch(sessionId: state.sessionId)
 
         case .userPulledToRefresh:
@@ -244,7 +256,7 @@ public struct ReportMainFeature {
                 return .cancel(id: CancelID.poll)
             case .ready, .insufficientAnalysis:
                 state.loadState = .loaded
-                return .cancel(id: CancelID.poll)
+                return .merge(.cancel(id: CancelID.poll), fetchVideoExpiry(state))
             }
 
         case let .reportRefreshed(report):
@@ -252,7 +264,7 @@ public struct ReportMainFeature {
             // 이미 받아 둔 보고서가 GENERATING 응답으로 되돌아가면 화면이 비므로 그 응답만 버린다.
             guard report.status != .generating else { return .none }
             apply(report, to: &state)
-            return .none
+            return fetchVideoExpiry(state)
 
         case let .reportRefreshFailed(error):
             // 화면은 그대로 둔다 — 알릴 것은 번역 못 하는 미승격 서버 에러뿐이다.
@@ -272,6 +284,18 @@ public struct ReportMainFeature {
 
         case .pollTicked:
             return fetch(sessionId: state.sessionId)
+
+        case let .videoExpiryLoaded(expiry):
+            // 잔여초를 지금 시각에 더해 만료 시각으로 바꿔 둔다 — 1초 갱신은 뷰의 TimelineView 몫이다.
+            state.isVideoExpiredByServer = expiry.expired
+            state.videoExpiresAt = expiry.expired ? nil : now.addingTimeInterval(TimeInterval(expiry.expiresInSeconds))
+            return .none
+
+        case .videoExpiryFailed:
+            // 서버 값이 없으면 클라가 지어낼 기한도 없다 — 처음부터 못 받았으면 카운트다운은 숨겨진 채다(HLT-44).
+            // 재진입·새로고침의 재조회 실패는 이미 받은 서버 값을 지우지 않는다 — 기한은 늘기만 해서(PRD Part 4 §5)
+            // 옛 값은 틀린 방향이 아닌 하한이다.
+            return .none
         }
     }
 
@@ -288,6 +312,24 @@ public struct ReportMainFeature {
             state.selectedGuestIndex = 0
             state.expandedCommentAxes = []
         }
+        // 영상이 재생 대상에서 빠졌으면 남은 시간도 의미가 없다.
+        if state.playableVideoURL == nil {
+            state.videoExpiresAt = nil
+        }
+    }
+
+    /// 영상 남은 시간 조회 — 재생할 영상이 있을 때만 묻는다(만료·영상 없음이면 셀 것이 없다).
+    /// 보고서 폴링과 수명을 따로 둔다: 폴링 취소가 이 조회까지 끊으면 카운트다운이 영영 안 뜬다.
+    private func fetchVideoExpiry(_ state: State) -> Effect<Action> {
+        // 영상이 빠졌으면 진행 중인 조회도 끊는다 — 늦게 온 옛 응답이 비워 둔 남은 시간을 되살리지 않게.
+        guard state.playableVideoURL != nil else { return .cancel(id: CancelID.videoExpiry) }
+        return .run { [sessionId = state.sessionId] send in
+            await send(.inner(.videoExpiryLoaded(try await interviewReportClient.videoExpiry(sessionId))))
+        } catch: { error, send in
+            guard !(error is CancellationError) else { return }
+            await send(.inner(.videoExpiryFailed))
+        }
+        .cancellable(id: CancelID.videoExpiry, cancelInFlight: true)
     }
 
     /// 채점이 끝나지 않았을 때 다음 조회를 예약한다. 상한을 넘으면 수동 재시도로 넘긴다.
@@ -380,7 +422,9 @@ public extension ReportMainFeature.State {
 
     /// 재생 가능한 영상 주소. 만료·nil·형식 오류를 한 곳에서 흡수해
     /// 플레이어가 만료를 알 필요 없게 한다 (정의서 §8).
+    /// `video/expiry` 가 만료를 알렸으면 보고서 판정보다 우선한다(서버가 더 최근에 다시 계산한 값).
     var playableVideoURL: URL? {
+        guard !isVideoExpiredByServer else { return nil }
         guard let video = report?.video, video.expired != true, let raw = video.url else { return nil }
         return URL(string: raw)
     }

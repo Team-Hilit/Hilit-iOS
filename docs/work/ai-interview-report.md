@@ -75,7 +75,7 @@ ReportMain ─[영상 다시보기]─────────────→ Re
 | `headline: String?` | 리포트 맨 위 한 줄 요약 | **서버 소유 문구.** 3갈래 분기(정상/분석부족/레드플래그)는 서버가 반영해 내려준다 — 클라는 그대로 표시, nil 이면 §6 폴백 |
 | `card.cardRedFlagNotices` (보고서 단위 필드 없음) | «상세 리포트» 제목 옆 느낌표 툴팁 | **보고 있는 질문 카드 것만** — 그 카드 배열을 **줄바꿈으로 전부** 잇는다(건수 상한 없음). `message` 그대로 노출, `type` 은 표시하지 않는다(로깅·분기용) |
 | `video.url: String?` | `[영상 다시보기]` | `String` → `URL(string:)` 변환 실패 시 만료와 동일 취급 |
-| `video.expired: Bool?` / `expiresAt: Date?` | 버튼 활성/비활성 + 만료 안내 | `expired == true` **또는** `url == nil` → 비활성 + §6 만료 문구 |
+| `video.expired: Bool?` / `expiresAt: Date?` | 버튼 활성/비활성 + 만료 안내 | `expired == true` **또는** `url == nil` → 비활성 + §6 만료 문구. 남은 시간 표시는 `expiresAt` 이 아니라 `videoExpiry`(GET `…/video/expiry`) 값만 쓴다 — 실패면 숨김, 그쪽 `expired == true` 도 비활성(HLT-44) |
 | `cards: [InterviewReportCard]?` | 항목 카드 2~4개 | 순서는 서버 배열 순서를 따른다(클라 재정렬 금지) |
 | `card.axisOrder` / `depthLevel` | 카드 제목 | 표시 규칙 `"질문 {axisOrder}-{depthLevel}"`. 축 이름은 내부 용어라 노출하지 않는다 |
 | `card.questionText: String?` | 카드의 질문 텍스트 | — |
@@ -164,6 +164,7 @@ public extension ReportMainFeature.State {
     var visibleRedFlagNotices: [RedFlagNotice] { Array(cards.flatMap { $0.cardRedFlagNotices ?? [] }.prefix(2)) }
     var cards: [InterviewReportCard] { report?.cards ?? [] }
     var playableVideoURL: URL? {                     // 만료·nil·형식오류를 한 곳에서 흡수
+        guard !isVideoExpiredByServer else { return nil }   // `video/expiry` 의 만료가 우선 (HLT-44)
         guard report?.video?.expired != true, let raw = report?.video?.url else { return nil }
         return URL(string: raw)
     }
@@ -441,6 +442,7 @@ Domain 추가분에 `TranscriptSegment`·`TranscriptWord`(서버 타임스탬프
 - `.insufficientAnalysis` → 분석 부족 분기 + 채점된 카드만
 - 툴팁은 선택 카드 것만 — 해상도 안내 카드 → 1줄, 레드플래그 3건 카드 → 3줄, 안내 없는 카드 → 느낌표·툴팁 없음
 - `video.expired == true` / `url == nil` / 형식 오류 → `playableVideoURL == nil`
+- `video/expiry` 첫 조회 실패 → 카운트다운 숨김(재생은 유지), 재조회 실패는 받은 값 유지 · `expired == true` → `playableVideoURL == nil` · 재생할 영상 없으면 조회 안 함
 - 하이라이트 탭 → 시트 present, `tone` 매핑(`"GOOD"`→`.good`, 미지값→`.unknown`)
 - 범위 밖 `startIndex/endIndex` → 시트 미present (크래시 없음)
 - 해상도 낮음 카드 → 탭 대상 없음

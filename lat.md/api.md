@@ -105,7 +105,7 @@ JWT — Access 3시간 / Refresh 7일, Rotation(재발급 시 페어가 통째�
 | 메서드 | 엔드포인트 | 비고 |
 |---|---|---|
 | `report` | GET `/api/v1/interview/sessions/{id}/report` | 보고서 미생성이면 404 가 아니라 `status=GENERATING` 응답 |
-| `videoExpiry` | GET `.../video/expiry` | 만료 카운트다운 폴링 — `video.expiresAt` 과 같은 시각의 초 단위 재계산. 만료면 `0/true`, 최대 보관 30일 |
+| `videoExpiry` | GET `.../video/expiry` | 만료 카운트다운의 유일한 출처([[report#1차 리포트]]) — `video.expiresAt` 과 같은 시각의 초 단위 재계산. 만료면 `0/true`, 최대 보관 30일 |
 
 - `status` 는 채점 진행 상태만 — GENERATING(전 필드 nil — script 포함, 폴링 지속) / READY / INSUFFICIENT_ANALYSIS(채점된 카드만) / FAILED.
 - 레드플래그는 보고서 단위 배열이 없다 — 걸린 카드의 `cardRedFlagNotices` 로만 온다. 저장 5종 중 노출 3종(지어냄·모순·무결점 서사)만 중립 문구. READY + 심각 레드플래그면 headline 이 중립 사실 요약으로 대체. 원소는 **문구 문자열** 또는 `{type, message}` 둘 다로 오므로 `RedFlagNotice` 가 양쪽을 받는다(문자열이면 `type` 은 nil).

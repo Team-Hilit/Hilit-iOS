@@ -15,7 +15,7 @@ import Foundation
 public struct InterviewReportClient: Sendable {
     /// GET /interview/sessions/{id}/report — 보고서 미생성이면 404 가 아니라 `status == .generating` 으로 온다(폴링 지속).
     public var report: @Sendable (_ sessionId: Int) async throws -> InterviewReport
-    /// GET /interview/sessions/{id}/video/expiry — 영상 만료 카운트다운 폴링용.
+    /// GET /interview/sessions/{id}/video/expiry — 영상 만료 카운트다운용(리포트 로드·새로고침·재진입 때 조회).
     /// 영상 레코드가 아직 없으면(업로드 완료 전) `InterviewReportError.videoNotFound`.
     public var videoExpiry: @Sendable (_ sessionId: Int) async throws -> InterviewVideoExpiry
 

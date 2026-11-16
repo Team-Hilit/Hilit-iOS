@@ -11,11 +11,11 @@ import SwiftUI
 /// 면접 영상 진입 카드 — 그림은 DS `CountdownCard`(Figma «countdown-card») 가 그리고,
 /// 이 타입은 «만료 시각 → 남은 시간·상태» 파생과 1초 갱신, 탭만 소유한다.
 ///
-/// 갱신을 `TimelineView` 로 뷰 안에서 처리하는 이유: 남은 시간은 서버 `expiresAt` 에서 파생되는 표시값이라
+/// 갱신을 `TimelineView` 로 뷰 안에서 처리하는 이유: 남은 시간은 서버 `video/expiry` 값에서 파생되는 표시값이라
 /// State 에 둘 필요가 없다. 리듀서에 1초 틱 effect 를 넣으면 폴링과 무관한 액션이 매초 흘러
 /// 테스트·디버깅만 시끄러워진다.
 struct VideoCountdownCard: View {
-    /// 시청 만료 시각 — nil 이면 서버가 기한을 안 내린 것이라 카운트다운을 감춘다.
+    /// 시청 만료 시각(`video/expiry` 환산) — nil 이면 서버 값을 못 받은 것이라 카운트다운을 감춘다.
     let expiresAt: Date?
     /// 재생 불가(만료·주소 없음) — 회색 변형으로 낮추고 탭을 막는다.
     let isExpired: Bool
