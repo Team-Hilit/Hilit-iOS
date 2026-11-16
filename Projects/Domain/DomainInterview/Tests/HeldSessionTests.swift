@@ -10,31 +10,57 @@ import Testing
 
 @testable import DomainInterviewInterface
 
-// 프로세스 토큰 판정(스펙 ⑤) — 다른 프로세스에서 **시작된** 면접의 보관값은 재개 제안 대상이 아니다.
+// 재개 판정 — 영구 보관 빌드의 값은 프로세스와 무관하게 재개 가능(HLT-78), 구버전 값만 프로세스 토큰
+// 판정(스펙 ⑤)을 따른다 — 다른 프로세스에서 **시작된** 옛 면접은 디스크 원장이 없어 재개 제안 대상이 아니다.
 struct HeldSessionTests {
     @Test("토큰이 현재 프로세스면 재개 가능")
     func inProcessSessionIsResumable() {
         let held = HeldSession(sessionId: 1, recordedSeconds: 60, processToken: HeldSession.currentProcessToken)
-        #expect(held.isResumableInCurrentProcess)
+        #expect(held.isResumable)
     }
 
-    @Test("토큰이 다르면(죽은 프로세스) 재개 불가")
+    @Test("구버전 값은 토큰이 다르면(죽은 프로세스) 재개 불가")
     func foreignSessionIsNotResumable() {
-        let held = HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID())
-        #expect(!held.isResumableInCurrentProcess)
+        let held = HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID(), persistsSegments: false)
+        #expect(!held.isResumable)
+    }
+
+    // HLT-78 — 세그먼트 원장이 디스크에 남아 다음 프로세스가 이어 녹화한다. 걸러 내면 킬 클린업이
+    // USER_EXIT 로 닫아 진행분 리포트가 생성되고 이용권이 차감된다.
+    @Test("영구 보관 값은 죽은 프로세스 것이어도 재개 가능 — 앱이 죽은 뒤 이어서 진행")
+    func persistedForeignSessionIsResumable() {
+        #expect(HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID()).isResumable)
+        #expect(HeldSession(sessionId: 1, recordedSeconds: 0, processToken: UUID()).isResumable)
+    }
+
+    @Test("persistsSegments 는 저장·복원을 왕복한다")
+    func persistsSegmentsSurvivesRoundTrip() throws {
+        let held = HeldSession(sessionId: 3, recordedSeconds: 30, processToken: UUID())
+        let decoded = try JSONDecoder().decode(HeldSession.self, from: JSONEncoder().encode(held))
+        #expect(decoded == held)
+        #expect(decoded.persistsSegments)
+    }
+
+    @Test("persistsSegments 키가 없는 옛 저장값은 false 로 읽힌다 — 디스크 원장이 없던 시절 값")
+    func legacyValueWithTokenDecodesAsNotPersisted() throws {
+        let token = UUID()
+        let legacy = Data(#"{"sessionId":7,"recordedSeconds":42,"hasStarted":true,"processToken":"\#(token.uuidString)"}"#.utf8)
+        let held = try JSONDecoder().decode(HeldSession.self, from: legacy)
+        #expect(!held.persistsSegments)
+        #expect(!held.isResumable)
     }
 
     // 이 케이스가 «0초는 무조건 재개 가능» 이던 옛 규칙의 구멍이었다 — `recordedSeconds` 는 백그라운드
     // 마감에서만 갱신돼, 백그라운드를 거치지 않고 죽은 면접(크래시·메모리 압박)이 0초로 남는다.
     // 그걸 시작 직후 보관분(표식 없음)으로 오인하면 킬 클린업이 대상으로 잡지 못해 서버 세션이 영영 살아남는다.
-    @Test("0초라도 토큰이 다르면 재개 불가 — 백그라운드 없이 죽은 면접이 0초로 남는다")
+    @Test("구버전 값은 0초라도 토큰이 다르면 재개 불가 — 백그라운드 없이 죽은 면접이 0초로 남는다")
     func foreignZeroProgressSessionIsNotResumable() {
-        #expect(!HeldSession(sessionId: 1, recordedSeconds: 0, processToken: UUID()).isResumableInCurrentProcess)
+        #expect(!HeldSession(sessionId: 1, recordedSeconds: 0, processToken: UUID(), persistsSegments: false).isResumable)
     }
 
     @Test("표식 없는 보관값은 시작 직후(녹화 열기 전) — 잃을 영상이 없어 프로세스를 넘어 재개 가능")
     func unstampedSessionIsResumable() {
-        #expect(HeldSession(sessionId: 1, recordedSeconds: 0, processToken: nil).isResumableInCurrentProcess)
+        #expect(HeldSession(sessionId: 1, recordedSeconds: 0, processToken: nil).isResumable)
     }
 
     @Test("토큰 없는 구버전 저장값도 디코딩된다 — 옵셔널 하위호환")
@@ -43,7 +69,7 @@ struct HeldSessionTests {
         let held = try JSONDecoder().decode(HeldSession.self, from: legacy)
         #expect(held.sessionId == 7)
         #expect(held.processToken == nil)
-        #expect(!held.isResumableInCurrentProcess)   // 진행분 있음 + 토큰 없음 = 죽은 프로세스 취급
+        #expect(!held.isResumable)   // 진행분 있음 + 토큰 없음 = 죽은 프로세스 취급
         // 옛 장부는 [시작하기] 탭에서만 심었다 — 없는 필드를 false 로 읽으면 업그레이드 순간
         // 진행 중이던 면접의 카드가 사라지고 킬 클린업이 그 세션을 닫아 버린다.
         #expect(held.hasStarted)
@@ -56,7 +82,7 @@ struct HeldSessionTests {
     @Test("시작 전 장부는 표식이 없어 프로세스를 넘어 살아남는다 — 카드도 남는다")
     func unstartedSessionSurvivesRelaunch() {
         let held = HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: false, processToken: nil)
-        #expect(held.isResumableInCurrentProcess)
+        #expect(held.isResumable)
         #expect(!held.hasStarted)   // 카드는 뜨되 [이어서 진행] 은 준비 화면으로 되돌아간다
     }
 
@@ -101,6 +127,6 @@ struct HeldSessionTests {
 
     @Test("프리뷰 보관값은 재개 가능하다 — 홈 프리뷰의 «진행 중» 변형이 필터에 걸려 사라지면 안 된다")
     func previewValueIsResumable() {
-        #expect(HeldSessionStore.previewValue.load()?.isResumableInCurrentProcess == true)
+        #expect(HeldSessionStore.previewValue.load()?.isResumable == true)
     }
 }

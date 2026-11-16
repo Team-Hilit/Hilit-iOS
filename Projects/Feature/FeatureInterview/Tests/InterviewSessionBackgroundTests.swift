@@ -137,7 +137,8 @@ struct InterviewSessionBackgroundTests {
                     continuation.onTermination = { _ in calls.continuation.yield("micCaptureCancelled") }
                 }
             }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.finishSessionAudioRecording = {
                 calls.continuation.yield("sessionAudioFinished")
                 return .stub
@@ -221,7 +222,7 @@ struct InterviewSessionBackgroundTests {
     // 잡으려면 «이 프로세스에서 면접이 시작됐다» 는 표식이 **시작 시점에** 찍혀 있어야 한다. 생성 시점
     // 보관값은 표식이 없어 갓 시작한 보관분과 구분되지 않고, 그래서 서버 세션이 영영 살아남았다
     // (2026-08-09 결함 수정 — 판정 자체는 `HeldSessionTests`·`HeldSessionCleanupTests`).
-    @Test("면접 시작이 보관값에 프로세스 표식을 찍는다 — 백그라운드 없이 죽어도 정리 대상이 된다")
+    @Test("면접 시작이 보관값에 프로세스 표식을 찍는다 — 영구 보관 값이라 앱이 죽어도 재개 대상이다")
     func recordingStartStampsProcessToken() async {
         let saved = LockIsolated<HeldSession?>(nil)
         let store = TestStore(initialState: .fixture()) { InterviewSessionFeature() }
@@ -231,7 +232,8 @@ struct InterviewSessionBackgroundTests {
         store.dependencies.recordingClient.startRecording = { _ in 0 }
         store.dependencies.heldSessionStore.save = { saved.setValue($0) }
         store.dependencies.speechClient.startCapture = { AsyncStream { $0.finish() } }
-        store.dependencies.speechClient.startSessionAudioRecording = {}
+        store.dependencies.recordingClient.sessionAudioURL = { nil }
+        store.dependencies.speechClient.startSessionAudioRecording = { _ in }
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in finishedPlayback() }
         store.dependencies.speechClient.startAnswerRecording = {}
@@ -240,7 +242,8 @@ struct InterviewSessionBackgroundTests {
         await store.send(.view(.onAppear))
         await store.receive(\.inner.recordingStarted)
         #expect(saved.value?.processToken == HeldSession.currentProcessToken)
-        #expect(saved.value?.isResumableInCurrentProcess == true)   // 이 프로세스에선 여전히 재개 대상
+        #expect(saved.value?.isResumable == true)
+        #expect(saved.value?.persistsSegments == true)   // 다음 프로세스에서도 재개 대상(HLT-78)
     }
 
     @Test("동결 후 도착한 늦은 제출 응답은 무시된다 — 취소와 도착의 레이스를 상태로 닫는다")
@@ -288,7 +291,8 @@ struct InterviewSessionResumeSeedTests {
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
         store.dependencies.speechClient.startCapture = { AsyncStream { $0.finish() } }
-        store.dependencies.speechClient.startSessionAudioRecording = {}
+        store.dependencies.recordingClient.sessionAudioURL = { nil }
+        store.dependencies.speechClient.startSessionAudioRecording = { _ in }
         // speechClient.play 는 스텁하지 않는다 — 요약 mp3 경로로 새면 unimplemented 가 잡는다.
 
         await store.send(.view(.onAppear))
@@ -317,7 +321,8 @@ struct InterviewSessionResumeSeedTests {
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
         store.dependencies.speechClient.startCapture = { AsyncStream { $0.finish() } }
-        store.dependencies.speechClient.startSessionAudioRecording = {}
+        store.dependencies.recordingClient.sessionAudioURL = { nil }
+        store.dependencies.speechClient.startSessionAudioRecording = { _ in }
 
         await store.send(.view(.onAppear))
         await store.receive(\.inner.recordingStarted)
@@ -350,7 +355,8 @@ struct InterviewSessionResumeSeedTests {
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
         store.dependencies.speechClient.startCapture = { AsyncStream { $0.finish() } }
-        store.dependencies.speechClient.startSessionAudioRecording = {}
+        store.dependencies.recordingClient.sessionAudioURL = { nil }
+        store.dependencies.speechClient.startSessionAudioRecording = { _ in }
 
         #expect(!store.state.isExitAvailable)   // init 판정으로는 아직 잠겨 있다
         await store.send(.view(.onAppear))

@@ -21,12 +21,26 @@ struct HeldSessionCleanupTests {
         ) == nil)
     }
 
-    @Test("죽은 프로세스에서 시작된 면접만 정리 대상이다 — 누적초 갱신 전에 죽은 0초도 포함")
+    @Test("구버전 값 중 죽은 프로세스에서 시작된 면접만 정리 대상이다 — 누적초 갱신 전에 죽은 0초도 포함")
     func deadSessionIsTarget() {
-        #expect(HeldSessionCleanup.target(HeldSession(sessionId: 7, recordedSeconds: 60, processToken: UUID())) == 7)
+        #expect(HeldSessionCleanup.target(
+            HeldSession(sessionId: 7, recordedSeconds: 60, processToken: UUID(), persistsSegments: false)
+        ) == 7)
         // 백그라운드를 거치지 않고 죽어 누적초가 0 으로 남은 면접 — 원 결함이 여기였다(2026-08-09).
-        #expect(HeldSessionCleanup.target(HeldSession(sessionId: 7, recordedSeconds: 0, processToken: UUID())) == 7)
-        #expect(HeldSessionCleanup.target(HeldSession(sessionId: 7, recordedSeconds: 60, processToken: nil)) == 7)
+        #expect(HeldSessionCleanup.target(
+            HeldSession(sessionId: 7, recordedSeconds: 0, processToken: UUID(), persistsSegments: false)
+        ) == 7)
+        #expect(HeldSessionCleanup.target(
+            HeldSession(sessionId: 7, recordedSeconds: 60, processToken: nil, persistsSegments: false)
+        ) == 7)
+    }
+
+    // HLT-78 — 닫으면 USER_EXIT 가 진행분 리포트(= 이용권 차감)를 트리거한다. 원장이 디스크에 남아
+    // 이어 녹화할 수 있으니 홈 카드로 남겨 [이어서 진행] 에 맡긴다.
+    @Test("영구 보관 값은 죽은 프로세스 것이어도 정리 대상이 아니다 — 앱 종료 후 재개, 이용권 보존")
+    func persistedDeadSessionIsNotTarget() {
+        #expect(HeldSessionCleanup.target(HeldSession(sessionId: 7, recordedSeconds: 60, processToken: UUID())) == nil)
+        #expect(HeldSessionCleanup.target(HeldSession(sessionId: 7, recordedSeconds: 0, processToken: UUID())) == nil)
     }
 
     // 홈 필터와 같은 술어를 부정한다는 계약의 나머지 절반 — 홈이 카드로 그리는 장부는 여기 걸리면

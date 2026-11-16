@@ -200,11 +200,11 @@ struct HomeHeldSessionTests {
         #expect(store.state.startInterview.variant == .exhausted)
     }
 
-    @Test("죽은 프로세스의 진행분 보관값은 카드가 되지 않는다 — 없는 것처럼 first 로 떨어진다")
+    @Test("구버전 죽은 프로세스의 진행분 보관값은 카드가 되지 않는다 — 없는 것처럼 first 로 떨어진다")
     func deadHeldSessionIsIgnored() async {
-        // 지난 실행이 남긴 진행분 — 세그먼트 파일(tmp·프로세스 수명)이 사라져 이어 붙일 앞부분이 없다.
+        // 영구 보관 이전 빌드가 남긴 진행분 — 디스크 원장이 없어 이어 붙일 앞부분이 없다.
         let store = Self.store(
-            held: HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID()),
+            held: HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID(), persistsSegments: false),
             remaining: 3
         )
 
@@ -218,7 +218,7 @@ struct HomeHeldSessionTests {
     func deadHeldSessionDoesNotMaskExhausted() async {
         // 걸러 낸 자리는 «보관값이 없는» 자리와 같아야 한다 — 잔여 판정이 그대로 이어진다.
         let store = Self.store(
-            held: HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID()),
+            held: HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID(), persistsSegments: false),
             remaining: 0
         )
 
@@ -254,9 +254,24 @@ struct HomeHeldSessionTests {
         #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 4))
     }
 
-    @Test("죽은 프로세스의 진행분 보관값도 카드가 되지 않는다 — 킬 클린업이 주울 몫이다")
-    func deadProcessHeldDoesNotBecomeCard() async {
+    // HLT-78 — 원장이 디스크에 남아 다음 프로세스가 이어 녹화한다. 앱이 죽은 뒤에도 [이어서 진행] 이 떠야
+    // 이용권을 소모하지 않고 같은 면접을 마칠 수 있다.
+    @Test("영구 보관 값은 앱이 죽은 뒤에도 카드가 된다 — 환산된 남은 질문 수로")
+    func persistedDeadProcessHeldBecomesCard() async {
         let held = HeldSession(sessionId: 1, recordedSeconds: 320, hasStarted: true, processToken: UUID())
+        let store = Self.store(held: held, remaining: 3)
+
+        await store.send(.view(.onAppear))
+        #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 1))
+        await store.receive(\.inner.entryLoaded)
+        #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 1))
+    }
+
+    @Test("구버전 죽은 프로세스의 진행분 보관값도 카드가 되지 않는다 — 킬 클린업이 주울 몫이다")
+    func deadProcessHeldDoesNotBecomeCard() async {
+        let held = HeldSession(
+            sessionId: 1, recordedSeconds: 320, hasStarted: true, processToken: UUID(), persistsSegments: false
+        )
         let store = Self.store(held: held, remaining: 3)
 
         await store.send(.view(.onAppear))

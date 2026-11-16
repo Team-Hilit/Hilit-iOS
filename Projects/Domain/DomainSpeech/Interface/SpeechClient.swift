@@ -43,6 +43,13 @@ public struct SessionAudioRecording: Equatable, Sendable {
         self.fileURL = fileURL
         self.startedAtHostSeconds = startedAtHostSeconds
     }
+
+    /// 첫 버퍼 시각을 기록 즉시 남기는 옆 파일(`<파일>.start`, 내용은 초 단위 숫자 텍스트) — 기록을 닫지 못하고
+    /// 앱이 죽어도 립싱크 기준이 남는다(HLT-78). DomainRecording 원장 복원이 같은 규칙으로 읽는다
+    /// (`SegmentLedger.audioStartStampURL` — 모듈 의존을 만들지 않으려 규칙만 공유한다).
+    public static func startStampURL(for fileURL: URL) -> URL {
+        fileURL.appendingPathExtension("start")
+    }
 }
 
 public struct SpeechClient: Sendable {
@@ -58,7 +65,9 @@ public struct SpeechClient: Sendable {
     /// 호출부(Feature)가 url·headers 로 풀어 전달한다.
     public var playStream: @Sendable (_ url: URL, _ headers: [String: String]) async -> AsyncStream<PlaybackEvent>
     /// 세션 전구간 m4a 기록 시작 — 세션 화면이 녹화 시작(시계 0점) 직후 호출. 캡처 미가동이면 조용히 무시.
-    public var startSessionAudioRecording: @Sendable () async -> Void
+    /// `fileURL` 은 기록 위치(녹화 원장이 정한 보관 경로 — 앱이 죽어도 다음 실행이 찾는다, HLT-78). nil 이면 tmp.
+    /// 조각 단위로 써서 기록 중에 죽어도 마지막 조각까지 읽힌다.
+    public var startSessionAudioRecording: @Sendable (_ fileURL: URL?) async -> Void
     /// 세션 전구간 기록을 닫고 산출물 반환 — 파일은 유지(삭제는 합성부 몫). 미기록·실패는 nil.
     public var finishSessionAudioRecording: @Sendable () async -> SessionAudioRecording?
     /// AI 발화 구간 무음화 — 질문 TTS·마무리 멘트 재생 중 스피커 에코가 영상에 남지 않게(서버가 그 구간에 TTS 합성).
@@ -78,7 +87,7 @@ public struct SpeechClient: Sendable {
         stopCapture: @escaping @Sendable () async -> Void,
         play: @escaping @Sendable (Data) async -> AsyncStream<PlaybackEvent>,
         playStream: @escaping @Sendable (_ url: URL, _ headers: [String: String]) async -> AsyncStream<PlaybackEvent>,
-        startSessionAudioRecording: @escaping @Sendable () async -> Void,
+        startSessionAudioRecording: @escaping @Sendable (_ fileURL: URL?) async -> Void,
         finishSessionAudioRecording: @escaping @Sendable () async -> SessionAudioRecording?,
         setSessionAudioMuted: @escaping @Sendable (Bool) async -> Void,
         startAnswerRecording: @escaping @Sendable () async -> Void,
@@ -140,7 +149,7 @@ extension SpeechClient: TestDependencyKey {
                     $0.finish()
                 }
             },
-            startSessionAudioRecording: {},
+            startSessionAudioRecording: { _ in },
             finishSessionAudioRecording: { nil },
             setSessionAudioMuted: { _ in },
             startAnswerRecording: {},

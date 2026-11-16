@@ -546,12 +546,10 @@ extension InterviewSessionFeature {
             state.isExitAvailable = true   // 시드가 경계를 넘긴 재개 — 등호 tick 이 다시 오지 않는다
         }
         state.questionAudioStartedAt = state.elapsedSeconds
-        // «이 프로세스에서 면접이 시작됐다» 를 여기서 못 박는다(2026-08-09) — 이 표식이 없으면 앱이
-        // 백그라운드를 **거치지 않고** 죽었을 때(크래시·메모리 압박·동결 완주 전 강제 종료) 보관값이
-        // 시작 탭 시점의 «0초·토큰 없음» 그대로 남아 갓 시작한 보관분과 구분되지 않고, 킬 클린업이
-        // 대상으로 잡지 못해 서버 세션이 영영 살아남는다([[interview#Client 계약]]).
-        // 녹화 실패(success == false)여도 찍는다 — 표식의 뜻은 «세그먼트 보유» 가 아니라 «면접 시작» 이고,
-        // 음성만으로 진행한 세션도 답변이 서버에 쌓여 정리 대상이다.
+        // «이 프로세스에서 면접이 시작됐다» 를 여기서 못 박는다(2026-08-09). 이 빌드의 저장값은
+        // `persistsSegments`(기본 true)라 앱이 죽어도 재개 대상이고(원장이 디스크에 남는다 — HLT-78),
+        // 표식은 구버전 저장값 판정에만 쓰인다([[interview#Client 계약]]). 누적초는 재개 진입의 근사 시드다.
+        // 녹화 실패(success == false)여도 찍는다 — 표식의 뜻은 «세그먼트 보유» 가 아니라 «면접 시작» 이다.
         heldSessionStore.save(HeldSession(
             sessionId: state.sessionId,
             recordedSeconds: Int(cumulativeSeconds.rounded()),
@@ -870,7 +868,8 @@ extension InterviewSessionFeature {
         .run { _ in
             let events = await speechClient.startCapture()
             if startsSessionAudio {
-                await speechClient.startSessionAudioRecording()
+                // 기록 위치는 녹화 원장이 정한 보관 경로 — 앱이 마감 없이 죽어도 다음 실행이 오디오 짝을 찾는다(HLT-78).
+                await speechClient.startSessionAudioRecording(await recordingClient.sessionAudioURL())
             }
             for await event in events {
                 switch event {

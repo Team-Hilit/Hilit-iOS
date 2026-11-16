@@ -31,7 +31,8 @@ struct InterviewSessionAudioMuteTests {
             $0.recordingClient.startPreview = { nil }
             $0.recordingClient.startRecording = { _ in 0 }
             $0.speechClient.startCapture = { AsyncStream { $0.finish() } }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.setSessionAudioMuted = { muted in
                 calls.withValue { $0.append(muted ? "mute" : "unmute") }
             }

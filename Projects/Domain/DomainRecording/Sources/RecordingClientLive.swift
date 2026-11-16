@@ -20,10 +20,12 @@ extension RecordingClient: @retroactive DependencyKey {
             startPreview: { await manager.startPreview() },
             stopPreview: { await manager.stopPreview() },
             startRecording: { try await manager.startRecording(sessionId: $0) },
+            sessionAudioURL: { await manager.sessionAudioURL() },
             suspendRecording: { await manager.suspendRecording(audio: $0) },
             stopRecording: { try await manager.stopRecording(finalAudio: $0) },
             discardRecording: { await manager.discardRecording() },
-            purgeRecordings: { await manager.purgeRecordings(sessionId: $0) }
+            purgeRecordings: { await manager.purgeRecordings(sessionId: $0) },
+            purgeStaleRecordings: { await manager.purgeStaleRecordings(keeping: $0) }
         )
     }()
 }
@@ -48,7 +50,8 @@ actor CameraSessionManager {
     private var startingFileURL: URL?
     /// 정지·시작 중 들어온 폐기 요청 — 그때 지워도 진행 중인 작업이 산출물을 다시 만든다. 그 작업이 끝날 때 처리한다.
     private var discardRequested = false
-    /// 세션의 마감된 세그먼트 원장 — 화면이 dismiss 돼도 액터가 살아 있는 한 유지된다(재개의 근거).
+    /// 세션의 마감된 세그먼트 원장 — 화면이 dismiss 돼도 액터가 살아 있는 한 유지되고, 기록 시작·마감 직전·마감 뒤마다 매니페스트로
+    /// 디스크에 남아 앱이 죽어도 다음 프로세스의 startRecording 이 되살린다(재개의 근거 — HLT-78).
     private var ledger = SegmentLedger()
 
     private struct ActiveRecording {
@@ -108,8 +111,18 @@ actor CameraSessionManager {
         if !session.isRunning { session.startRunning() }
         let output = try attachMovieOutput(to: session)
 
+        // 이 프로세스가 처음 보는 세션이면 앞 프로세스가 남긴 원장부터 되살린다 — 앱이 죽은 뒤 재개(HLT-78).
+        // 매니페스트가 없으면(새 세션) no-op 이고, 아래 begin 이 세션 전환으로 보고 원장을 새로 연다.
+        await restoreLedgerIfNeeded(sessionId: sessionId)
+        ensureStorageDirectory()
+        // 앞 프로세스가 기록 중에 죽었으면 이 인덱스에 마감 안 된(moov 없는) 파일이 남아 있다 — 아래에서 지우고 덮는다.
         let videoURL = ledger.begin(sessionId: sessionId)   // 세션이 바뀌면 원장 리셋 + 인덱스 경로
         try? FileManager.default.removeItem(at: videoURL)
+        // 이 세그먼트의 세션 오디오 자리 — 앞 프로세스가 같은 인덱스에 남긴 것(복원에서 빠진 것)은 비운다.
+        let audioURL = SegmentLedger.audioURL(sessionId: sessionId, index: ledger.segments.count)
+        let audioStampURL = SegmentLedger.audioStartStampURL(for: audioURL)
+        try? FileManager.default.removeItem(at: audioURL)
+        try? FileManager.default.removeItem(at: audioStampURL)
         startingFileURL = videoURL   // 아직 추적 배열에 없다 — 진행 중 폐기의 삭제 대상에서 제외하기 위한 표시.
 
         let delegate = MovieRecordingDelegate()
@@ -129,6 +142,12 @@ actor CameraSessionManager {
             await rollbackStart(videoURL: videoURL)
             throw RecordingError.startFailed("녹화 폐기됨")
         }
+        // 기록이 섰으면 곧바로 원장에 «열린» 세그먼트로 남긴다 — 마감 도중에 앱이 죽어도 다음 프로세스가
+        // 이 파일을 안다(HLT-78, 2026-11-17 실기기: 마감 뒤에만 기록하면 닫힌 파일까지 잃었다).
+        // 오디오 자리도 함께 — 세션 화면이 `sessionAudioURL()` 로 받아 거기에 기록한다(첫 버퍼 시각은 스탬프 파일).
+        ledger.open(videoURL: videoURL, startedAtHostSeconds: delegate.startedAtHostSeconds, reservedAudioURL: audioURL)
+        track(audioURL, audioStampURL)
+        persistManifest()
         return ledger.cumulativeSeconds
     }
 
@@ -170,7 +189,18 @@ actor CameraSessionManager {
         } else {
             discardRequested = false
             purgeTrackedFiles()
+            // 파일을 지웠으니 원장·매니페스트도 비운다 — 남기면 다음 begin·재실행 복원이 없는 파일을 이어받는다.
+            resetLedger()
         }
+    }
+
+    /// 진행 중 세그먼트의 세션 오디오 기록 경로 — 녹화가 없으면 nil(호출부는 tmp 로 기록한다).
+    func sessionAudioURL() -> URL? {
+        let url = recording == nil ? nil : ledger.openSegment?.reservedAudioURL
+        if url == nil {
+            Self.logger.error("세션 오디오 경로 없음 — recording \(self.recording == nil ? "nil" : "있음"), open \(self.ledger.openSegment == nil ? "nil" : "있음")")
+        }
+        return url
     }
 
     /// 현 세그먼트 마감 — 파일을 닫고 실측 길이로 원장에 올린다(스펙 ①). suspend·stop 공용.
@@ -179,25 +209,51 @@ actor CameraSessionManager {
         // (suspend 경로는 여기가 유일한 track 지점이라, 아래로 내려가면 마감 실패 시 오디오가 영영 안 지워진다).
         track(audio?.fileURL)
         guard let recording else { throw RecordingError.stopFailed("진행 중인 녹화 없음") }
+        // 오디오는 파일을 닫기 «전에» 보관 폴더로 옮기고 원장에 기록한다 — 아래 마감(파일 닫기·길이 로드)은
+        // 수 초 걸려 그사이 앱이 죽을 수 있다. 원장에 짝이 남아 있으면 다음 프로세스가 길이를 재서 온전히 살린다.
+        let adopted = audio.map { adoptAudio($0, sessionId: recording.sessionId, index: ledger.segments.count) }
+        let reservedAudioURL = ledger.openSegment?.reservedAudioURL
+        if let adopted {
+            ledger.attachOpenAudio(adopted)
+            persistManifest()
+        }
         recording.output.stopRecording()
         self.recording = nil
+        let finished: Result<Void, Error>
         do {
             try await recording.delegate.waitUntilFinished()
+            finished = .success(())
         } catch {
-            detachOutput(recording.output)
-            throw RecordingError.stopFailed(String(describing: error))
+            finished = .failure(error)
         }
         detachOutput(recording.output)
-        guard FileManager.default.fileExists(atPath: recording.url.path) else {
-            throw RecordingError.stopFailed("비디오 파일 없음")
+        let duration: Double
+        do {
+            try finished.get()
+            guard FileManager.default.fileExists(atPath: recording.url.path) else {
+                throw RecordingError.stopFailed("비디오 파일 없음")
+            }
+            duration = try await AVURLAsset(url: recording.url).load(.duration).seconds
+        } catch {
+            // 못 쓰는 세그먼트 — 열린 항목을 원장에서 내린다(남기면 재실행 복원이 깨진 파일을 다시 잰다).
+            ledger.dropOpenSegment()
+            persistManifest()
+            throw RecordingError.stopFailed(String(describing: error))
         }
-        let duration = try await AVURLAsset(url: recording.url).load(.duration).seconds
+        // 오디오 인자가 없는 마감(세션 오디오 마무리 실패·코디네이터의 `suspendRecording(nil)` 등)이어도, 이 세그먼트의
+        // 예약 경로에 기록된 오디오가 읽히고 스탬프가 있으면 짝으로 붙인다 — 마감 경로마다 오디오를 잃지 않게 한 곳에서 막는다.
+        var segmentAudio = adopted
+        if segmentAudio == nil, let reservedAudioURL {
+            segmentAudio = await Self.recoverAudio(at: reservedAudioURL)
+            Self.logger.notice("마감에 오디오 인자 없음 — 예약 경로 회수 \(segmentAudio == nil ? "실패" : "성공")")
+        }
         ledger.append(SegmentLedger.Segment(
             videoURL: recording.url,
             videoStartedAtHostSeconds: recording.delegate.startedAtHostSeconds,
             videoDurationSeconds: duration.isFinite ? duration : 0,
-            audio: audio
+            audio: segmentAudio
         ))
+        persistManifest()
         return ledger.cumulativeSeconds
     }
 
@@ -218,7 +274,7 @@ actor CameraSessionManager {
                 // 그 사이 시작된 «새» 녹화 소속 파일은 제외 — 기록 중인 mp4 를 지우면 그 녹화가 깨진다.
                 purgeTrackedFiles(excluding: activeRecordingFileURLs)
                 // 파일을 지웠으니 원장도 비운다 — 남기면 다음 begin 이 없는 파일을 이어받아 합성이 깨진다.
-                ledger.reset()
+                resetLedger()
                 // 시작 중인 녹화가 있으면 요청은 그 꼬리(startRecording)가 마저 처리한다.
                 if !isStarting { discardRequested = false }
             }
@@ -251,6 +307,9 @@ actor CameraSessionManager {
             if discardRequested {
                 // 그 사이 시작된 «새» 녹화 소속 파일은 제외 — 기록 중인 mp4 를 지우면 그 녹화가 깨진다.
                 purgeTrackedFiles(excluding: activeRecordingFileURLs)
+                // 합성이 실패해 원장이 아직 이 세션 것이면 매니페스트와 함께 비운다 — 남기면 이 프로세스에선
+                // 원장이 세션을 계속 소유해 `purgeRecordings` 가 no-op 이 된다. 새 세션 원장은 건드리지 않는다.
+                if ledger.sessionId == sessionId { resetLedger() }
                 // 시작 중인 녹화가 있으면 요청은 그 꼬리(startRecording)가 마저 처리한다.
                 if !isStarting { discardRequested = false }
             }
@@ -258,7 +317,17 @@ actor CameraSessionManager {
         if recording != nil {
             _ = try await finalizeCurrentSegment(audio: finalAudio)
         }
-        let segments = ledger.segments
+        // 오디오 파일이 사라진 세그먼트는 무음으로 합성한다 — 예약 경로 회수로 붙인 오디오는 세션 쪽 폐기가 나중에
+        // 지울 수 있고, 없는 파일을 넘기면 합성이 통째로 실패해 영상 전체를 잃는다.
+        let segments = ledger.segments.map { segment in
+            guard let audio = segment.audio, !FileManager.default.fileExists(atPath: audio.fileURL.path) else { return segment }
+            return SegmentLedger.Segment(
+                videoURL: segment.videoURL,
+                videoStartedAtHostSeconds: segment.videoStartedAtHostSeconds,
+                videoDurationSeconds: segment.videoDurationSeconds,
+                audio: nil
+            )
+        }
         guard !segments.isEmpty else { throw RecordingError.stopFailed("세그먼트 없음") }
         // 전 세그먼트 무음이면 기존 계약대로 throw — 무음 영상을 만들지 않는다(일부 무음 세그먼트는 허용).
         guard segments.contains(where: { $0.audio != nil }) else {
@@ -273,10 +342,14 @@ actor CameraSessionManager {
         // 원본 임시 파일은 합성 성공 후에만 정리 — 합성본만 남긴다.
         for segment in segments {
             removeTracked(segment.videoURL)
-            if let audio = segment.audio { removeTracked(audio.fileURL) }
+            if let audio = segment.audio {
+                removeTracked(audio.fileURL, SegmentLedger.audioStartStampURL(for: audio.fileURL))
+            }
         }
         // 합성(8~10초) 중 «새» 세션이 시작됐으면 원장은 이미 그 세션 것이다 — 그때 비우면 새 세션이
         // 마감된 세그먼트 0 을 잃고(다음 begin 이 세션 전환으로 오판해 파일을 덮어쓴다) 누적초도 0 으로 돌아간다.
+        // 매니페스트는 세션별 파일이라 어느 쪽이든 이 세션 것만 지운다 — 남기면 재실행 복원이 지운 세그먼트를 찾는다.
+        try? FileManager.default.removeItem(at: SegmentLedger.manifestURL(sessionId: sessionId))
         if ledger.sessionId == sessionId { ledger.reset() }
         // 합성 중 폐기를 요청받았으면 산출물은 곧 defer 가 지운다 — 지워질 파일을 참조로 돌려주지 않는다.
         guard !discardRequested else { throw RecordingError.stopFailed("녹화 폐기됨") }
@@ -294,17 +367,7 @@ actor CameraSessionManager {
         discardRequested = false
         purgeTrackedFiles()
         // 원장까지 비운다 — 남겨 두면 다음 세션 시작이 폐기된 세그먼트를 누적초·합성 재료로 이어받는다.
-        ledger.reset()
-    }
-
-    /// 킬 클린업 전용(스펙 ④) — 그 세션의 잔존 파일을 tmp 에서 걷어낸다. 현재 원장의 세션이면 무시.
-    func purgeRecordings(sessionId: Int) {
-        guard sessionId != ledger.sessionId else { return }
-        let tmp = FileManager.default.temporaryDirectory
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? []
-        for name in names where name.hasPrefix("interview-video-\(sessionId)-") || name == "interview-recording-\(sessionId).mp4" {
-            try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
-        }
+        resetLedger()
     }
 
     /// 진행 중인 기록을 즉시 정지·해제 — 파일 정리 범위는 경우마다 달라 호출부 몫으로 둔다.
@@ -421,6 +484,137 @@ actor CameraSessionManager {
         session.beginConfiguration()
         session.removeOutput(output)
         session.commitConfiguration()
+    }
+}
+
+// MARK: - 보관 파일 정리·원장 영속(HLT-78)
+
+// 같은 파일 extension — actor 본문 길이 상한(type_body_length) 때문에 갈랐다. private 상태는 파일 범위라 그대로 닿는다.
+extension CameraSessionManager {
+    /// 그 세션의 보관 파일(세그먼트·오디오·합성본·매니페스트)을 걷어낸다 — 이 프로세스의 원장이 모르는
+    /// 세션(앞 프로세스가 남긴 것)을 끝낼 때 쓴다. 현재 원장의 세션이면 무시(그쪽은 `discardRecording` 몫).
+    /// 구버전이 tmp 에 남긴 같은 세션 파일도 함께 지운다.
+    func purgeRecordings(sessionId: Int) {
+        guard sessionId != ledger.sessionId else { return }
+        removeStoredFiles { $0 == sessionId }
+        let tmp = FileManager.default.temporaryDirectory
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? []
+        for name in names where name.hasPrefix("interview-video-\(sessionId)-") || name == "interview-recording-\(sessionId).mp4" {
+            try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
+        }
+    }
+
+    /// 실행 시점 잔존 정리 — 보관 디렉토리에서 `keeping`(장부의 세션)·현재 원장 세션이 **아닌** 파일을 지운다.
+    /// 영구 보관이라 어느 정리 경로가 빠져도(앱이 정리 도중 죽는 등) 쌓이기만 한다 — 그 누수를 실행마다 회수한다.
+    func purgeStaleRecordings(keeping sessionId: Int?) {
+        let owned = ledger.sessionId
+        removeStoredFiles { $0 != sessionId && $0 != owned }
+    }
+
+    /// 보관 디렉토리에서 이름 규칙상 소속 세션이 `shouldRemove` 를 만족하는 파일 삭제 — 추적 배열에서도 뺀다.
+    private func removeStoredFiles(where shouldRemove: (Int) -> Bool) {
+        let directory = SegmentLedger.directory
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names {
+            guard let owner = SegmentLedger.sessionId(ofFileName: name), shouldRemove(owner) else { continue }
+            removeTracked(directory.appendingPathComponent(name))
+        }
+    }
+
+    /// 이 프로세스가 처음 보는 세션이면 디스크 매니페스트로 원장을 되살리고, 복원한 파일을 폐기 추적에 편입한다.
+    /// 길이 없는(열린) 항목은 파일에서 길이를 잰다 — 마감까지 끝나고 죽었으면 읽히고, 기록 중에 죽었으면 못 읽는다.
+    private func restoreLedgerIfNeeded(sessionId: Int) async {
+        guard ledger.sessionId != sessionId,
+              let data = try? Data(contentsOf: SegmentLedger.manifestURL(sessionId: sessionId)),
+              let manifest = try? JSONDecoder().decode(SegmentLedger.Manifest.self, from: data),
+              manifest.sessionId == sessionId
+        else { return }
+        var measured: [URL: Double] = [:]
+        var recoveredAudioStarts: [URL: Double] = [:]
+        for entry in manifest.entries where entry.videoDurationSeconds == nil {
+            let url = SegmentLedger.directory.appendingPathComponent(entry.videoFileName)
+            measured[url] = await Self.readableDuration(of: url)
+        }
+        // 마감 없이 죽은 세그먼트의 오디오 — 스탬프(첫 버퍼 시각)가 있고 파일이 읽힐 때만 짝으로 살린다.
+        // 못 읽는 오디오를 넘기면 합성이 통째로 실패해 영상 전체를 잃는다(무음 세그먼트가 낫다).
+        for entry in manifest.entries where entry.audioStartedAtHostSeconds == nil {
+            guard let name = entry.audioFileName else { continue }
+            let url = SegmentLedger.directory.appendingPathComponent(name)
+            recoveredAudioStarts[url] = await Self.recoverAudio(at: url)?.startedAtHostSeconds
+        }
+        ledger.restore(
+            manifest,
+            in: SegmentLedger.directory,
+            fileExists: { FileManager.default.fileExists(atPath: $0.path) },
+            measuredDuration: { measured[$0] },
+            recoveredAudioStart: { recoveredAudioStarts[$0] }
+        )
+        for segment in ledger.segments {
+            track(segment.videoURL, segment.audio?.fileURL, segment.audio.map { SegmentLedger.audioStartStampURL(for: $0.fileURL) })
+        }
+        Self.logger.notice("원장 복원 — session \(sessionId), 세그먼트 \(self.ledger.segments.count)개, \(self.ledger.cumulativeSeconds)s")
+    }
+
+    /// 예약 경로의 세션 오디오를 짝으로 되살린다 — 스탬프(첫 버퍼 시각)가 있고 파일이 읽힐 때만.
+    private static func recoverAudio(at url: URL) async -> RecordingAudioSegment? {
+        guard let raw = try? String(contentsOf: SegmentLedger.audioStartStampURL(for: url), encoding: .utf8),
+              let startedAt = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              await readableDuration(of: url) != nil
+        else { return nil }
+        return RecordingAudioSegment(fileURL: url, startedAtHostSeconds: startedAt)
+    }
+
+    /// 읽을 수 있는 미디어 길이(초) — 못 열거나 0 이하·비유한이면 nil. 마감 없이 죽은 파일 판정용.
+    private static func readableDuration(of url: URL) async -> Double? {
+        guard let seconds = try? await AVURLAsset(url: url).load(.duration).seconds, seconds.isFinite, seconds > 0
+        else { return nil }
+        return seconds
+    }
+
+    /// 보관 디렉토리 준비 — iCloud 백업 제외(수백 MB 임시 산출물).
+    private func ensureStorageDirectory() {
+        var directory = SegmentLedger.directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? directory.setResourceValues(values)
+    }
+
+    /// 세션 오디오(Speech 가 tmp 에 쓴 것)를 보관 디렉토리로 옮겨 원장 소유로 만든다 — tmp 에 두면 앱이 안 도는
+    /// 사이 OS 가 지울 수 있다. 옮기기 실패면 원래 자리 그대로 쓴다(이 프로세스 안의 합성엔 지장 없다).
+    private func adoptAudio(_ audio: RecordingAudioSegment, sessionId: Int, index: Int) -> RecordingAudioSegment {
+        let destination = SegmentLedger.audioURL(sessionId: sessionId, index: index)
+        guard audio.fileURL != destination else { return audio }
+        do {
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: audio.fileURL, to: destination)
+        } catch {
+            Self.logger.error("세션 오디오 이동 실패: \(String(describing: error))")
+            return audio
+        }
+        lastFileURLs.removeAll { $0 == audio.fileURL }
+        track(destination)
+        return RecordingAudioSegment(fileURL: destination, startedAtHostSeconds: audio.startedAtHostSeconds)
+    }
+
+    /// 원장을 매니페스트로 기록 — 기록 시작·마감 직전·마감 뒤. 실패는 로그만(재실행 재개만 잃고 이 프로세스 흐름은 그대로다).
+    private func persistManifest() {
+        guard let manifest = ledger.manifest else { return }
+        do {
+            ensureStorageDirectory()
+            try JSONEncoder().encode(manifest)
+                .write(to: SegmentLedger.manifestURL(sessionId: manifest.sessionId), options: .atomic)
+        } catch {
+            Self.logger.error("원장 기록 실패: \(String(describing: error))")
+        }
+    }
+
+    /// 원장 리셋 + 그 세션 매니페스트 삭제 — 파일을 지운 뒤의 리셋은 전부 이걸 쓴다.
+    private func resetLedger() {
+        if let sessionId = ledger.sessionId {
+            try? FileManager.default.removeItem(at: SegmentLedger.manifestURL(sessionId: sessionId))
+        }
+        ledger.reset()
     }
 }
 

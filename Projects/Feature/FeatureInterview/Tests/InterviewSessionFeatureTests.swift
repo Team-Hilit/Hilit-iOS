@@ -32,7 +32,8 @@ struct InterviewSessionFeatureTests {
             $0.recordingClient.startRecording = { _ in 0 }
             $0.speechClient.startCapture = { AsyncStream { $0.finish() } }
             $0.speechClient.playStream = { _, _ in finishedPlayback() }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.setSessionAudioMuted = { _ in }
             $0.speechClient.startAnswerRecording = {}
             $0.interviewClient.questionAudioStream = stubAudioStream
@@ -69,7 +70,8 @@ struct InterviewSessionFeatureTests {
                 played.setValue(data)
                 return finishedPlayback()
             }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.setSessionAudioMuted = { _ in }
             $0.speechClient.startAnswerRecording = {}
         }
@@ -99,7 +101,8 @@ struct InterviewSessionFeatureTests {
             $0.recordingClient.stopRecording = { _ in .stub }
             $0.speechClient.startCapture = { AsyncStream { $0.finish() } }
             $0.speechClient.playStream = { _, _ in finishedPlayback() }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.finishSessionAudioRecording = { .stub }
             $0.speechClient.stopCapture = {}
             $0.speechClient.setSessionAudioMuted = { _ in }
@@ -139,7 +142,8 @@ struct InterviewSessionFeatureTests {
             $0.recordingClient.stopRecording = { _ in .stub }
             $0.speechClient.startCapture = { AsyncStream { $0.finish() } }
             $0.speechClient.playStream = { _, _ in finishedPlayback() }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.finishSessionAudioRecording = { .stub }
             $0.speechClient.stopCapture = {}
             $0.speechClient.setSessionAudioMuted = { _ in }
@@ -206,7 +210,8 @@ struct InterviewSessionFeatureTests {
                     }
                 }
             }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.setSessionAudioMuted = { _ in }
             $0.interviewClient.questionAudioStream = stubAudioStream
             // «중단하기» 는 이제 abandon(NETWORK_DISCONNECT)+held clear 를 앞세운다 — 여기선 통과만 시킨다
@@ -570,7 +575,8 @@ struct InterviewSessionSubmissionTests {
             $0.recordingClient.stopRecording = { _ in .stub }
             $0.speechClient.startCapture = { AsyncStream { $0.finish() } }
             $0.speechClient.playStream = { _, _ in finishedPlayback() }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.finishSessionAudioRecording = { .stub }
             $0.speechClient.stopCapture = {}
             $0.speechClient.setSessionAudioMuted = { _ in }
@@ -658,7 +664,8 @@ struct InterviewSessionRecordingTests {
             $0.speechClient.startCapture = { AsyncStream { $0.finish() } }
             $0.speechClient.playStream = { _, _ in finishedPlayback() }
             $0.speechClient.play = { _ in wrapUpPlayback.stream }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.finishSessionAudioRecording = { sessionAudio }
             $0.speechClient.stopCapture = {}
             $0.speechClient.setSessionAudioMuted = { _ in }
@@ -745,7 +752,7 @@ struct InterviewSessionRecordingTests {
 
     // 세션 오디오 기록은 캡처 엔진이 세팅하는 tap 포맷을 전제로 한다 — 먼저 열리면 조용히 무시돼
     // finish 가 늘 nil 이 되고 모든 세션이 «영상 없는 리포트» 로 수렴한다. 순서를 코드가 아니라 여기서 못 박는다.
-    @Test("세션 오디오 기록은 마이크 캡처가 선 다음에 열린다", .timeLimit(.minutes(1)))
+    @Test("세션 오디오 기록은 마이크 캡처가 선 다음, 녹화 원장이 정한 보관 경로로 열린다", .timeLimit(.minutes(1)))
     func sessionAudioOpensAfterCaptureEngine() async {
         let calls = AsyncStream<String>.makeStream()
         let store = TestStore(initialState: .fixture()) {
@@ -759,7 +766,10 @@ struct InterviewSessionRecordingTests {
                 calls.continuation.yield("startCapture")
                 return AsyncStream { $0.finish() }
             }
-            $0.speechClient.startSessionAudioRecording = { calls.continuation.yield("startSessionAudioRecording") }
+            $0.recordingClient.sessionAudioURL = { URL(fileURLWithPath: "/recordings/interview-audio-1-0.m4a") }
+            $0.speechClient.startSessionAudioRecording = { url in
+                calls.continuation.yield("startSessionAudioRecording:\(url?.lastPathComponent ?? "nil")")
+            }
             $0.speechClient.playStream = { _, _ in finishedPlayback() }
             $0.speechClient.setSessionAudioMuted = { _ in }
             $0.speechClient.startAnswerRecording = {}
@@ -774,7 +784,7 @@ struct InterviewSessionRecordingTests {
             observed.append(call)
             if observed.count == 2 { break }
         }
-        #expect(observed == ["startCapture", "startSessionAudioRecording"])
+        #expect(observed == ["startCapture", "startSessionAudioRecording:interview-audio-1-0.m4a"])
     }
 
     @Test("녹화 시작 실패면 세션 오디오도 열지 않는다 — 합성 입력 없이 기록만 남기지 않는다")
@@ -788,7 +798,7 @@ struct InterviewSessionRecordingTests {
             $0.recordingClient.startPreview = { nil }
             $0.recordingClient.startRecording = { _ in throw RecordingError.startFailed("스텁") }
             $0.speechClient.startCapture = { AsyncStream { $0.finish() } }
-            $0.speechClient.startSessionAudioRecording = { sessionAudioOpened.setValue(true) }
+            $0.speechClient.startSessionAudioRecording = { _ in sessionAudioOpened.setValue(true) }
             $0.speechClient.playStream = { _, _ in finishedPlayback() }
             $0.speechClient.setSessionAudioMuted = { _ in }
             $0.speechClient.startAnswerRecording = {}

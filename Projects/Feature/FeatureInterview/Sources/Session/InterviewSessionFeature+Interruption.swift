@@ -71,8 +71,8 @@ extension InterviewSessionFeature {
                     audio.map { RecordingAudioSegment(fileURL: $0.fileURL, startedAtHostSeconds: $0.startedAtHostSeconds) }
                 )
                 await speechClient.stopCapture()
-                // held 갱신 — #69 «녹화하며 갱신» 미배선이 여기서 해소된다. 토큰은 «이 프로세스가
-                // 세그먼트를 들고 있다» 는 표식(스펙 ⑤). 녹화가 없던 세션은 0초 보관값을 건드리지 않는다.
+                // held 갱신 — #69 «녹화하며 갱신» 미배선이 여기서 해소된다. 마감된 세그먼트는 원장
+                // 매니페스트로 디스크에 남아 앱이 죽어도 이어진다(HLT-78). 녹화가 없던 세션은 0초 보관값을 건드리지 않는다.
                 if hasRecording, let cumulative {
                     heldSessionStore.save(HeldSession(
                         sessionId: sessionId,

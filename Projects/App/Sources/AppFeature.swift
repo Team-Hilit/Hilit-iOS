@@ -27,7 +27,7 @@ import Foundation
 //                             리포트 줄 두 버튼(.reportRequested/.feedbackRequested)은 마이페이지를 **덮는** 별도 리포트 커버(`myPageReport`)를 세운다 — 목록이 도착지라서다.
 //                             홈의 진행 중 두 갈래(중단·재개)도 여기서 InterviewClient·HeldSessionStore 로 배선한다.
 //                             .interrupted(백그라운드 동결 세션의 홈 경유)는 cover 만 닫고 held 를 보존한다 — [[interview#코디네이터]].
-// depends-on: [[interview#프리뷰]] — 앱 사망 세션 정리가 RecordingClient.purgeRecordings 로 죽은 프로세스의 잔존 세그먼트를 걷는다.
+// depends-on: [[interview#프리뷰]] — 끝낸 세션 정리(discard→purgeRecordings 짝)·실행 시점 purgeStaleRecordings 가 녹화 보관 파일을 걷는다.
 // depends-on: [[onboarding]] — dev 전용 진입(Home 버튼)으로 온보딩 위저드를 present. 조립은 여기서만 (온보딩 본체 통합 전 임시).
 // depends-on: [[report]] — 홈 위젯②의 [레포트 보기] delegate 를 받아 리포트 커버를 세션 id 로 present. 리포트의 두 신호(닫기·다시 연습)도 여기서 받는다.
 //                            마이페이지발 진입은 같은 Feature 를 **다른 자리**(`myPageReport`)에 세운다 — 링크 생성 직행은 `entry: .peerFeedback`.

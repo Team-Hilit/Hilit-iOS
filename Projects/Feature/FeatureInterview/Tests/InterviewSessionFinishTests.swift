@@ -58,7 +58,8 @@ struct InterviewSessionFinishTests {
                     continuation.onTermination = { _ in calls.continuation.yield("micCaptureStopped") }
                 }
             }
-            $0.speechClient.startSessionAudioRecording = {}
+            $0.recordingClient.sessionAudioURL = { nil }
+            $0.speechClient.startSessionAudioRecording = { _ in }
             $0.speechClient.finishSessionAudioRecording = {
                 calls.continuation.yield("sessionAudioFinished")
                 return .stub

@@ -8,6 +8,7 @@
 import AVFoundation
 import ComposableArchitecture
 import DomainSpeechInterface
+import OSLog
 
 extension SpeechClient: @retroactive DependencyKey {
     /// 단일 매니저(캡처·재생)를 공유하는 liveValue — 세션 화면 재진입에도 같은 매니저를 쓴다.
@@ -19,7 +20,7 @@ extension SpeechClient: @retroactive DependencyKey {
             stopCapture: { await capture.stopCapture() },
             play: { await playback.play($0) },
             playStream: { await playback.playStream(url: $0, headers: $1) },
-            startSessionAudioRecording: { await capture.startSessionAudioRecording() },
+            startSessionAudioRecording: { await capture.startSessionAudioRecording(fileURL: $0) },
             finishSessionAudioRecording: { await capture.finishSessionAudioRecording() },
             setSessionAudioMuted: { await capture.setSessionAudioMuted($0) },
             startAnswerRecording: { await capture.startAnswerRecording() },
@@ -33,13 +34,15 @@ extension SpeechClient: @retroactive DependencyKey {
 /// 레벨·발화 판정은 tap 콜백(직렬)에서 SpeechActivityDetector 가 수행하고, 이벤트만 스트림으로 흘린다.
 /// 같은 tap 이 파일 기록 2계열도 담당한다 — 세션 전구간(합성 입력)·답변 구간(STT 제출).
 actor AudioCaptureManager {
+    private static let logger = Logger(subsystem: "com.hilit.speech", category: "capture")
     private var engine: AVAudioEngine?
     private var continuation: AsyncStream<SpeechCaptureEvent>.Continuation?
     /// tap 설치 시점의 입력 포맷 — 기록 파일도 반드시 «이 포맷»으로 열어야 한다.
     /// 시작 시점에 inputNode 를 다시 읽으면 라우트 변경(AirPods 연결 등)으로 버퍼 포맷과 갈라져
     /// `AVAudioFile.write` 가 try? 로 못 잡는 NSException 을 던진다.
     private var tapFormat: AVAudioFormat?
-    private let sessionRecorder = TapFileRecorder()
+    /// 세션 전구간 — 조각 기록(앱이 죽어도 읽힌다, HLT-78). 답변 구간은 짧고 곧 제출·삭제라 그대로 AVAudioFile.
+    private let sessionRecorder = FragmentedAudioRecorder()
     private let answerRecorder = TapFileRecorder()
     /// 진단 탐침(HILIT_STT_PROBE) — 켜졌을 때만 붙는다. 제품 동작에 관여하지 않는다.
     private var transcriptionProbe: MicTranscriptionProbe?
@@ -104,17 +107,18 @@ actor AudioCaptureManager {
         continuation = nil
     }
 
-    func startSessionAudioRecording() {
+    func startSessionAudioRecording(fileURL: URL?) {
         guard let tapFormat else { return }   // 캡처 미가동 — 조용히 무시(합성 스킵 → 영상 없는 리포트)
-        // 파일명은 매번 유일하게 — 산출물이 recorder 손을 떠나 합성(8~10초, 홈 복귀 뒤 화면 수명 밖)에서
-        // 읽히는 동안 다음 면접의 begin 이 같은 경로를 지우면 안 된다. 삭제는 합성부·discard 몫(고정명과 동일).
-        let url = FileManager.default.temporaryDirectory
+        // 기본은 녹화 원장이 정한 보관 경로(세그먼트·인덱스별 유일). 없으면(하네스·프리뷰) tmp 의 유일한 이름 —
+        // 산출물이 합성(8~10초, 화면 수명 밖)에서 읽히는 동안 다음 면접의 begin 이 같은 경로를 지우면 안 된다.
+        if fileURL == nil { Self.logger.error("세션 오디오 기록 경로 없음 — tmp 로 기록(앱이 죽으면 이 구간 오디오는 복원되지 않는다)") }
+        let url = fileURL ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("interview-session-audio-\(UUID().uuidString).m4a")
         sessionRecorder.begin(url: url, format: tapFormat)
     }
 
-    func finishSessionAudioRecording() -> SessionAudioRecording? {
-        guard let (url, startedAt) = sessionRecorder.finishKeepingFile() else { return nil }
+    func finishSessionAudioRecording() async -> SessionAudioRecording? {
+        guard let (url, startedAt) = await sessionRecorder.finishKeepingFile() else { return nil }
         return SessionAudioRecording(fileURL: url, startedAtHostSeconds: startedAt)
     }
 
