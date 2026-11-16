@@ -157,14 +157,33 @@ struct OnboardingJobDescriptionUploadFeatureTests {
         }
     }
 
-    @Test("URL 형식 1차 검사 — http(s) 스킴 + 호스트만 통과한다")
+    @Test("URL 형식 1차 검사 — https 스킴 + 호스트만 통과한다")
     func linkFormatValidation() {
         #expect(OnboardingJobDescriptionUploadFeature.isValidLinkFormat("https://recruit.hilit.dev/jobs/123"))
-        #expect(OnboardingJobDescriptionUploadFeature.isValidLinkFormat("http://43.202.34.84:8080/jd"))
+        #expect(!OnboardingJobDescriptionUploadFeature.isValidLinkFormat("http://recruit.hilit.dev/jobs/123")) // http 불가
         #expect(!OnboardingJobDescriptionUploadFeature.isValidLinkFormat("recruit.hilit.dev/jobs/123"))   // 스킴 없음
-        #expect(!OnboardingJobDescriptionUploadFeature.isValidLinkFormat("ftp://recruit.hilit.dev"))      // 비 http(s)
+        #expect(!OnboardingJobDescriptionUploadFeature.isValidLinkFormat("ftp://recruit.hilit.dev"))      // 비 https
         #expect(!OnboardingJobDescriptionUploadFeature.isValidLinkFormat("https://"))                     // 호스트 없음
         #expect(!OnboardingJobDescriptionUploadFeature.isValidLinkFormat("채용공고 본문 텍스트"))            // URL 아님
+    }
+
+    @Test("https 이전에 저장된 http draft 는 성공이 아니라 형식 에러로 복원되고, 리턴해도 넘어가지 않는다")
+    func legacyHTTPDraftRestoresAsFormatError() async {
+        let state = OnboardingJobDescriptionUploadFeature.State(restoring: .link("http://recruit.hilit.dev/jobs/1"))
+        #expect(state.linkValidation == .failure(message: OnboardingJobDescriptionUploadFeature.invalidFormatMessage))
+        #expect(!state.isContinueEnabled)
+        #expect(!state.isDirectTextDisabled)   // 직접 입력 탭으로 돌아갈 수 있다.
+
+        let store = TestStore(initialState: state) {
+            OnboardingJobDescriptionUploadFeature()
+        }
+        await store.send(.view(.userSubmittedLink))   // 형식 에러 그대로 — 서버 호출·delegate 없음.
+    }
+
+    @Test("https draft 는 검증 통과분으로 복원된다")
+    func httpsDraftRestoresAsSuccess() {
+        let state = OnboardingJobDescriptionUploadFeature.State(restoring: .link(link))
+        #expect(state.linkValidation == .success)
     }
 
     @Test("키보드 리턴은 계속하기와 같이 검증하고 다음 스텝으로 올린다")

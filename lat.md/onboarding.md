@@ -16,7 +16,7 @@ OnboardingFeature 가 위저드 루트. STEP 1(JD 업로드)을 NavigationStack 
 
 STEP 1 (선택 — 스킵 가능, 위저드 루트). 탭 «링크 붙여넣기 / 직접 입력하기»는 화면 전환이 아니라 State 의 InputMode. 링크 검증은 **«계속하기»(또는 키보드 리턴) 탭 → 클라이언트 형식 검사 → 통과분만 서버(JDClient.validate)** 2단 — 입력 중 자동 호출은 없다. 성공이면 바로 다음 스텝, 실패면 에러를 띄우고 머문다. 결과는 delegate(.continueRequested(JDSubmission?)) — .link/.text/nil(스킵).
 
-형식 검사는 http/https 스킴+호스트(`isValidLinkFormat`) — 불일치는 서버 왕복 없이 즉시 에러 문구. 에러/성공은 LinkValidation 하위 상태를 필드 변형(`HilitTextField.Status`)으로 그린다. 키패드 밖 터치 시 내림(`dismissesKeyboardOnTap` — SharedDS 공통).
+형식 검사는 **https** 스킴+호스트(`isValidLinkFormat` — 기획 `https://…`, http 는 2026-11-12 HLT-60 으로 막았다. 그 전에 저장된 http draft 는 성공이 아니라 형식 에러로 복원한다) — 불일치는 서버 왕복 없이 즉시 에러 문구. 에러/성공은 LinkValidation 하위 상태를 필드 변형(`HilitTextField.Status`)으로 그린다. 키패드 밖 터치 시 내림(`dismissesKeyboardOnTap` — SharedDS 공통).
 
 **`.loading` 은 화면에 안 그린다** — 전역 LoadingModal 이 `JDClient.validate` 를 덮으므로 인라인 스피너를 두면 이중 로딩이다([[auth]] 가입 플로우와 같은 방침). 상태 자체는 남아 계속하기 중복 탭 게이트로 쓰인다. 필드 잠금(`.loading` 변형의 `disabled`)도 함께 사라졌는데 안전하다 — 검증 중 타이핑은 `.idle` 로 되돌리며 in-flight 를 취소한다. 100ms 켜기 지연 안에 끝난 검증은 모달조차 안 뜬다(의도 — 그 구간은 «즉시»로 읽힌다. 터치는 그 사이에도 막힌다).
 

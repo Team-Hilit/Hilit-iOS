@@ -94,7 +94,7 @@ public struct OnboardingJobDescriptionUploadFeature {
             linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
 
-        /// 링크가 클라이언트 1차 형식 검사(http(s) + 호스트)를 통과하는가.
+        /// 링크가 클라이언트 1차 형식 검사(https + 호스트)를 통과하는가.
         public var isLinkFormatValid: Bool {
             OnboardingJobDescriptionUploadFeature.isValidLinkFormat(
                 linkText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -137,7 +137,12 @@ public struct OnboardingJobDescriptionUploadFeature {
             case let .link(url):
                 self.mode = .link
                 self.linkText = url
-                self.linkValidation = .success   // 세션에 실린 링크는 검증 통과분이다.
+                // 세션에 실린 링크는 검증 통과분이다 — 단 https 제한(HLT-60) 이전에 저장된 http 링크는
+                // 지금 형식 검사를 못 넘는다. 성공으로 앉히면 버튼만 꺼지고 이유가 안 보이며, 키보드 리턴은
+                // `.success` 분기로 그대로 통과한다 — 형식 에러로 되살려 고치게 한다.
+                self.linkValidation = OnboardingJobDescriptionUploadFeature.isValidLinkFormat(url)
+                    ? .success
+                    : .failure(message: OnboardingJobDescriptionUploadFeature.invalidFormatMessage)
             case let .text(text):
                 self.mode = .directText
                 self.directText = text
@@ -354,12 +359,11 @@ public struct OnboardingJobDescriptionUploadFeature {
         state.linkText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// 클라이언트 1차 형식 검사 — http(s) 스킴 + 호스트를 갖춘 URL 인지.
-    /// 공고 본문을 통째로 붙여넣는 실수(공백·한글 포함) 등을 서버 왕복 없이 거른다.
+    /// 클라이언트 1차 형식 검사 — https 스킴 + 호스트를 갖춘 URL 인지. 기획은 `https://…` 만 받는다(HLT-60 —
+    /// http 는 Android·기획과 어긋났다). 공고 본문을 통째로 붙여넣는 실수(공백·한글 포함) 등도 서버 왕복 없이 거른다.
     static func isValidLinkFormat(_ raw: String) -> Bool {
         guard let components = URLComponents(string: raw),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
+              components.scheme?.lowercased() == "https",
               let host = components.host, !host.isEmpty
         else { return false }
         return true
