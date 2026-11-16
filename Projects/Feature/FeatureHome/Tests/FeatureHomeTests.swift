@@ -299,6 +299,63 @@ struct HomeHeldSessionTests {
         await store.send(.startInterview(.delegate(.resumeRequested)))
         await store.finish()
     }
+
+    @Test("[시작하기] 는 탭 시점에 잔여를 재조회하고, 남아 있으면 시작을 올린다")
+    func startRechecksTicketsThenStarts() async {
+        let store = Self.store(held: nil, remaining: 2)
+
+        await store.send(.startInterview(.delegate(.startRequested))) {
+            $0.isCheckingStartEligibility = true
+        }
+        await store.receive(\.inner.startEligibilityChecked) {
+            $0.isCheckingStartEligibility = false
+            $0.startInterview.remainingChances = 2
+        }
+        await store.receive(\.delegate.interviewStartRequested)
+    }
+
+    @Test("[시작하기] 탭 시점 재조회에서 잔여 0 이면 시작하지 않고 소진 안내로 바꾼다")
+    func startRecheckExhaustedBlocksStart() async {
+        let store = Self.store(held: nil, remaining: 0)
+
+        await store.send(.startInterview(.delegate(.startRequested))) {
+            $0.isCheckingStartEligibility = true
+        }
+        await store.receive(\.inner.startEligibilityChecked) {
+            $0.isCheckingStartEligibility = false
+            $0.startInterview.remainingChances = 0
+            $0.startInterview.variant = .exhausted
+        }
+        await store.finish()
+    }
+
+    @Test("[시작하기] 탭 시점 재조회가 실패하면 막지 않는다 — 최종 판정은 세션 생성 403")
+    func startRecheckFailureStillStarts() async {
+        let store = Self.store(held: nil, remaining: nil)
+
+        await store.send(.startInterview(.delegate(.startRequested))) {
+            $0.isCheckingStartEligibility = true
+        }
+        await store.receive(\.inner.startEligibilityChecked) {
+            $0.isCheckingStartEligibility = false
+        }
+        await store.receive(\.delegate.interviewStartRequested)
+    }
+
+    @Test("재조회 응답 전 [시작하기] 재탭은 무시한다")
+    func startRecheckIgnoresDoubleTap() async {
+        let store = Self.store(held: nil, remaining: 1)
+
+        await store.send(.startInterview(.delegate(.startRequested))) {
+            $0.isCheckingStartEligibility = true
+        }
+        await store.send(.startInterview(.delegate(.startRequested)))
+        await store.receive(\.inner.startEligibilityChecked) {
+            $0.isCheckingStartEligibility = false
+            $0.startInterview.remainingChances = 1
+        }
+        await store.receive(\.delegate.interviewStartRequested)
+    }
 }
 
 @MainActor

@@ -34,6 +34,8 @@ phase 와 **직교하는 두 번째 축** — 리포트 시트가 앉는 자리 
 
 홈 밖으로 나가는 5건은 delegate — `profileRequested`(마이페이지) · `reportDetailRequested(sessionId:)`(리포트 상세) · `interviewStartRequested`·`interviewRestartRequested(sessionId:)`·`interviewResumeRequested(sessionId:)`(StartInterview 의 `startRequested`·`restartRequested`·`resumeRequested` 를 올린 것 — `editInfoRequested` 는 포폴 분기와 함께 2026-08-08 삭제). 시작은 온보딩 위저드 cover, 진행 중 두 건은 abandon/resume API 를 거쳐 위저드·면접 cover 로, 리포트 상세는 리포트 cover 로, `profileRequested` 는 마이페이지 cover 로 이어진다(배선 전부 [[app#Cross-feature Routing]] — 5건 다 실배선, 남은 `.none` 없음). 진행 중 두 건의 **세션 id 는 홈이 로컬 보관값(`HeldSessionStore.load()`)에서 읽어 싣는다** — 서버가 목록으로 주지 않아(레포트 목록은 진행중 세션 제외) 보관값이 유일한 재료고, nil 이면(진행 중 변형인데 보관값 없음 = 비정상) guard 로 삼킨다. 펼침 토글(`userTappedReportRow`)은 홈 내부 상태라 delegate 가 아니다.
 
+**[시작하기] 는 탭 시점에 잔여 이용권을 재검증한다**(2026-11-12, HLT-100) — `startRequested` 를 곧장 올리지 않고 `UserClient.profile` 을 다시 불러(`inner(.startEligibilityChecked(profile:))`, 전용 조회 API 없음) `startVariant` 를 재판정한다. `first` 일 때만 `interviewStartRequested` 를 올리고, 잔여 0 이면 소진 안내로 바뀐 채 멈춘다. 조회 실패는 막지 않는다(«모르면 소진이 아니다» — 최종 판정은 세션 생성 403, 기획 미확정). 응답 전 재탭은 `isCheckingStartEligibility` 가 삼킨다. 계정 정지는 탭 시점에 알 수단이 없다 — 세션 생성 403 으로만 온다([[onboarding#프리로드]]).
+
 dev 계 임시 버튼은 1개(`HomeView` 인사말 옆 — 기록이 생기면 안 보이던 빈 상태 자리에서 2026-08-05 옮겼다) — `showsDevReset` 플래그로 게이팅하고 `delegate(.appDataResetRequested)`(로그아웃·Keychain·draft·UserDefaults 전체 삭제 후 Splash 판정 재실행 — [[app]])를 올린다. 2026-08-03 통합 전엔 온보딩 진입·디버그 로그아웃 두 버튼이었다.
 
 ## 진입 로드

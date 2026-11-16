@@ -108,6 +108,8 @@ public struct HomeFeature {
         public var startInterview: StartInterviewFeature.State
         /// dev 데이터 초기화 버튼 노출 여부 — AppFeature 가 dev 빌드에서만 켠다.
         public var showsDevReset: Bool
+        /// [시작하기] 탭 시점 잔여 재검증 중 — 응답 전 재탭으로 위저드가 두 번 열리지 않게 막는다(HLT-100).
+        public var isCheckingStartEligibility = false
 
         public init(
             phase: Phase = .default,
@@ -159,6 +161,8 @@ public struct HomeFeature {
             /// 기록 리스트 로드 결과 — 목록과 phase 를 함께 갱신한다.
             /// nil 은 «모른다»(호출 실패) — 직전 목록을 지우지 않는다. 빈 배열은 «기록이 없다» 로 다르다.
             case reportsLoaded([Report]?)
+            /// [시작하기] 탭 시점 프로필 재조회 결과(HLT-100) — 실패면 nil.
+            case startEligibilityChecked(profile: UserProfile?)
         }
 
         /// 부모(AppFeature) 통보. 부모는 이것만 매칭한다 (D1).
@@ -182,7 +186,7 @@ public struct HomeFeature {
     }
 
     /// 진입 로드 취소 식별자 — 탭을 빠르게 오갈 때 앞선 응답이 뒤늦게 덮어쓰는 걸 막는다.
-    private enum CancelID { case entryLoad }
+    private enum CancelID { case entryLoad, startEligibility }
 
     @Dependency(\.heldSessionStore) var heldSessionStore
     @Dependency(\.interviewClient) var interviewClient
@@ -283,6 +287,27 @@ public struct HomeFeature {
                 state.settle(.report)
                 return .none
             case .startInterview(.delegate(.startRequested)):
+                // 탭 시점에 잔여 이용권을 서버에서 다시 확인한다(HLT-100) — 홈 진입 때 받은 값은 그새
+                // 바뀌었을 수 있다(다른 기기·만료). 전용 조회 API 가 없어 프로필을 다시 부른다.
+                guard !state.isCheckingStartEligibility else { return .none }
+                state.isCheckingStartEligibility = true
+                return .run { send in
+                    await send(.inner(.startEligibilityChecked(profile: try? await userClient.profile())))
+                }
+                .cancellable(id: CancelID.startEligibility, cancelInFlight: true)
+            case let .inner(.startEligibilityChecked(profile)):
+                state.isCheckingStartEligibility = false
+                // 조회 실패면 막지 않는다 — «모르면 소진이 아니다»(startVariant 와 같은 규칙). 최종 판정은
+                // 세션 생성의 403 이 한다. TODO: 실패 시 차단 여부는 기획 확정 대기(HLT-68 «잔여를 못 받았을 때»).
+                if let profile {
+                    state.startInterview.remainingChances = profile.remainingTicketCount
+                }
+                // 변형을 다시 판정한다 — 잔여 0 이면 소진 안내로 바뀌고 위저드는 열지 않는다.
+                state.startInterview.variant = Self.startVariant(
+                    heldSession: heldSessionStore.load(),
+                    remainingChances: state.startInterview.remainingChances
+                )
+                guard state.startInterview.variant == .first else { return .none }
                 // 면접 플로우는 다른 Feature 라 AppFeature 가 조립한다(Feature→Feature 금지).
                 return .send(.delegate(.interviewStartRequested))
             // 진행 중 면접의 두 갈래도 홈이 처리할 수 없는 전환이라 그대로 위로 올린다 — 대상 세션은
