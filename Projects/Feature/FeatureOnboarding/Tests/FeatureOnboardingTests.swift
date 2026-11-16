@@ -163,6 +163,18 @@ struct OnboardingCoordinatorTests {
         await store.finish()
     }
 
+    @Test("프리로드 계정 정지는 위저드 delegate 로 올린다")
+    func preloadAccountSuspendedDelegatesUp() async {
+        var state = initialState()
+        state.path.append(.preload(.init(data: state.data)))
+        let store = makeStore(state)
+
+        let id = store.state.path.ids[0]
+        await store.send(.path(.element(id: id, action: .preload(.delegate(.accountSuspended)))))
+        await store.receive(\.delegate.accountSuspended)
+        await store.finish()
+    }
+
     @Test("연관성 실패(4회 미만)는 대표 프로젝트로 되돌리고 경고를 주입한다")
     func relevanceFailurePopsBackToMainProject() async {
         var state = initialState()

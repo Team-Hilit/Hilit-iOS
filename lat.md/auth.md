@@ -41,7 +41,7 @@ PRD Part 6·7 확정(2026-07-31)으로 FeatureAuth 가 로그인 단일 화면�
 - `AuthTermsFeature`(A1) — **동의 항목은 서버가 준다**(`ConsentClient.pending`, [[api#Consent]]) — 하드코딩 5종 enum 을 걷어냈다. 최초 동의(필수 5종 전체)와 재동의(바뀐 항목만)가 같은 화면이고 차이는 내려온 항목뿐. 진입 시 조회(세션 복구 경로는 판정이 이미 받은 항목을 `State(items:)` 로 주입해 재호출 없음), 제출(`submit`)까지 화면이 마치고 성공만 delegate. 항목 코드 → 시안 카피 매핑은 `ConsentItem.rowTitle`(모르는 코드는 서버 label 로 합성). 전문은 `document` 마크다운 — `Text` 가 인라인 문법만 알아서 ATX 헤딩(`### 제N조`)은 `DocumentBlock` 이 갈라 타이포로 올린다(안 그러면 «###» 이 그대로 보인다). `CONSENT_VERSION_MISMATCH` 면 체크를 비우고 pending 재조회.
 - `AuthOnboarding{Naming·Job·Experience·Register}` — `Sources/Onboarding/` 폴더. Job·Experience 는 FeatureOnboarding STEP1·2 의 **복사본**(Feature 간 공유 금지 — 원본은 위저드 정리 시 제거, [[onboarding]]). 넷 다 수집·표시만 하고 외부 IO 가 없다 — 프로필 PATCH 는 코디네이터가 연차 화면 delegate 를 받아 한다(위). 이름 단독 API 는 서버 삭제 예정이라 일괄 PATCH 로 흡수했다([[api#User]]).
 - **이름 화면 프리필** — 애플 로그인이 준 이름(`SocialCredential.socialName`)을 코디네이터가 `AuthOnboardingNamingFeature.State(name:)` 에 채워 넣는다. 이미 받은 정보를 다시 묻는 것이 App Review Guideline 4 리젝 사유였다(2026-08-15). **화면 자체는 없애지 않는다** — 애플은 이름을 최초 인가 1회에만 주고 재로그인·세션 복구 경로는 항상 nil 이라, 채울 값이 없을 때 물을 자리가 필요하다. 계약(한글·영문 5자)을 넘는 값은 채우지 않고 빈 칸으로 둔다: 잘라 넣으면 남의 이름을 줄인 값이 되고, 그대로 채우면 CTA 가 잠긴 채 이유를 못 알린다(길이 안내 문구가 시안에 없다).
-- `AuthSuspensionFeature`(A4) — 정지 안내. Path 밖 — 진입이 홈 게이트(`ACCOUNT_SUSPENDED`)라 제시는 AppFeature(cross-feature). CS 메일 주소는 placeholder.
+- `AuthSuspensionFeature`(A4) — 정지 안내. Path 밖 — 진입은 위저드 세션 생성의 403 `ACCOUNT_SUSPENDED`(2026-11-12 배선, HLT-54)라 제시는 AppFeature(cross-feature, 위저드 cover 위). 기획은 «면접 시작 탭 시점» 이지만 서버에 사전 조회 API 가 없다. CS 메일 주소는 placeholder.
 - `SplashView` — 판정 결과를 모르는 뷰. `onRetry` 를 받으면 판정 실패 상태(재시도 노출), nil 이면 판정 중. 판정 자체는 AppFeature 몫 → [[app#Splash 세션 복구]].
 
 ## 심사용 코드 로그인

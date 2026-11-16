@@ -134,6 +134,21 @@ final class InterviewClientLiveTests: XCTestCase {
         }
     }
 
+    func test_createSession_계정정지403을_accountSuspended로_매핑한다() async throws {
+        let client = makeClient { _ in
+            throw NetworkError.statusCode(403, Data(
+                #"{"success": false, "code": "ACCOUNT_SUSPENDED", "message": "비정상적인 이용 패턴이 반복 확인되어 면접 시작이 제한되었어요."}"#.utf8
+            ))
+        }
+
+        do {
+            _ = try await client.createSession(InterviewConfig(portfolioId: UUID()))
+            XCTFail("에러가 던져져야 한다")
+        } catch {
+            XCTAssertEqual(error as? InterviewError, .accountSuspended)
+        }
+    }
+
     // MARK: - 준비 폴링
 
     func test_sessionStatus_READY응답의_LocalDateTime과_요약질문을_디코딩한다() async throws {

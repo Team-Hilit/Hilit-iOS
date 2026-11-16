@@ -113,6 +113,8 @@ public struct OnboardingPreloadFeature {
             case statusPolled(InterviewSessionStatus)
             /// 세션 생성·폴링 실패 — 실패 모달로 전환.
             case analysisFailed(State.Failure)
+            /// 계정 정지(403 `ACCOUNT_SUSPENDED`) — 화면 상태 없이 코디네이터로 올린다.
+            case accountSuspended
             /// 집중 프로젝트 연관성 부족(FREETEXT_NOT_RELEVANT) — 코디네이터가 집중 프로젝트로 되돌린다.
             case relevanceCheckFailed
             /// 서버 JD 검증 캐시 만료(JD_NOT_VALIDATED) — 저장된 링크로 재검증 복구를 시도한다.
@@ -140,6 +142,8 @@ public struct OnboardingPreloadFeature {
             case retryRequested
             /// 이용권 소진 모달 [확인] — 위저드 이탈. dismiss 는 코디네이터 몫.
             case closeRequested
+            /// 계정 정지 — 정지 안내(A4)는 위저드 밖 화면이라 코디네이터가 위로 올린다(HLT-54).
+            case accountSuspended
         }
     }
 
@@ -207,6 +211,12 @@ public struct OnboardingPreloadFeature {
         case let .analysisFailed(failure):
             state.phase = .failed(failure)
             return .cancel(id: CancelID.stageTimer)
+
+        case .accountSuspended:
+            return .merge(
+                .send(.delegate(.accountSuspended)),
+                .cancel(id: CancelID.stageTimer)
+            )
 
         case .relevanceCheckFailed:
             // 화면 상태는 두지 않는다 — 코디네이터가 집중 프로젝트로 즉시 pop-back 한다.
@@ -308,7 +318,7 @@ public struct OnboardingPreloadFeature {
 
     /// 세션 생성 요청 — onAppear 최초 시도와 JD 재검증 후 재시도가 공유한다.
     /// 에러는 종류별로 분기한다: 연관성 부족 → 코디네이터 pop-back, JD 검증 만료 → 재검증 복구,
-    /// 이용권 소진 → 위저드 이탈 모달, 그 외 → 실패 모달.
+    /// 계정 정지 → 정지 안내, 이용권 소진 → 위저드 이탈 모달, 그 외 → 실패 모달.
     private func startSession(config: InterviewConfig) -> Effect<Action> {
         .run { send in
             await send(.inner(.sessionCreated(try await interviewClient.createSession(config))))
@@ -318,6 +328,8 @@ public struct OnboardingPreloadFeature {
                 await send(.inner(.relevanceCheckFailed))
             case .jdNotValidated?:
                 await send(.inner(.jdValidationExpired))
+            case .accountSuspended?:
+                await send(.inner(.accountSuspended))
             case .noRemainingTicket?:
                 await send(.inner(.analysisFailed(.noRemainingTicket)))
             default:

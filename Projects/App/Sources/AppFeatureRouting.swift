@@ -96,6 +96,9 @@ extension AppFeature {
         case let .report(action):
             return reduceReport(&state, action)
 
+        case let .suspension(action):
+            return reduceSuspension(&state, action)
+
         case .binding:
             return .none
         }
@@ -366,9 +369,27 @@ extension AppFeature {
             state.onboarding = nil
             return .send(.home(.view(.onAppear)))
 
+        // 계정 정지(HLT-54) — 세션 생성 403 이 유일한 신호다(서버에 사전 조회 API 가 없다). 위저드는
+        // 닫지 않고 그 위에 정지 안내를 얹는다 — 닫고 동시에 띄우면 전환이 겹쳐 present 가 묻힌다.
+        case .presented(.delegate(.accountSuspended)):
+            state.suspension = AuthSuspensionFeature.State()
+            return .none
+
         default:
             return .none
         }
+    }
+
+    /// 정지 안내 [홈으로] — 안내와 그 밑의 위저드를 함께 닫고 홈을 다시 태운다.
+    /// 위저드 draft 는 지우지 않는다 — 정지가 풀린 뒤 다시 시작하면 입력이 살아 있다(이탈과 같은 규칙).
+    private func reduceSuspension(
+        _ state: inout State,
+        _ action: PresentationAction<AuthSuspensionFeature.Action>
+    ) -> Effect<Action> {
+        guard case .presented(.delegate(.homeRequested)) = action else { return .none }
+        state.suspension = nil
+        state.onboarding = nil
+        return .send(.home(.view(.onAppear)))
     }
 
     /// 홈에서 연 리포트가 올리는 신호는 이탈(X) 하나 — 커버만 닫는다(리포트를 읽는 동안

@@ -41,6 +41,13 @@ struct AppView: View {
                     item: $store.scope(state: \.onboarding, action: \.onboarding)
                 ) { onboardingStore in
                     OnboardingView(store: onboardingStore)
+                        // 계정 정지 안내(A4) — 위저드의 세션 생성이 정지로 막히면 위저드를 **덮고** 뜬다.
+                        // 루트에 두면 떠 있는 위저드 cover 에 가려 아무것도 안 보인다(myPageReport 와 같은 이유).
+                        .fullScreenCover(
+                            item: $store.scope(state: \.suspension, action: \.suspension)
+                        ) { suspensionStore in
+                            AuthSuspensionView(store: suspensionStore)
+                        }
                 }
                 // 면접 흐름(Part2) — 온보딩 완주가 넘긴 세션으로 열린다. 카메라 프리뷰가 전면을 채우는
                 // 몰입 화면이라 네비바까지 덮는 fullScreenCover 다.

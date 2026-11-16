@@ -12,6 +12,9 @@ import DomainCommonInterface
 /// Feature 는 Core 를 모르므로(레이어 규칙) 이 타입만 잡는다. (→ ai-interview.md §5 STEP6 Phase B)
 /// 서버 코드 ↔ 케이스 매핑 표는 [[api#Interview]].
 public enum InterviewError: Error, Equatable, Sendable {
+    /// ACCOUNT_SUSPENDED (403) — 계정 정지. 면접 시작만 막힌다 — 정지 안내(A4) 화면으로 보낸다.
+    /// 세션 생성 게이트 1순위라 이용권·재동의보다 먼저 온다.
+    case accountSuspended
     /// NO_REMAINING_TICKET (403) — 이용권 소진. 결제/안내 분기.
     case noRemainingTicket
     /// PORTFOLIO_NOT_FOUND (404) — 세션 생성 입력의 포트폴리오가 없거나 본인 소유가 아님.
@@ -62,6 +65,7 @@ public enum InterviewError: Error, Equatable, Sendable {
 extension InterviewError: DomainAPIError {
     public init?(serverCode code: String, message: String) {
         switch code {
+        case "ACCOUNT_SUSPENDED": self = .accountSuspended
         case "NO_REMAINING_TICKET": self = .noRemainingTicket
         case "PORTFOLIO_NOT_FOUND": self = .portfolioNotFound
         case "PORTFOLIO_PROCESSING": self = .portfolioProcessing

@@ -17,6 +17,7 @@ import Foundation
 
 // @lat: [[app]]
 // depends-on: [[auth]] — 로그인 전/후 루트 게이트. cross-feature 조립은 AppFeature 에서만.
+// depends-on: [[auth#가입 플로우]] — 위저드 세션 생성의 계정 정지(403) 신호로 정지 안내(A4)를 위저드 위에 얹는다.
 // depends-on: [[deeplink#두 경로]] — 링크 도착이 둘(설치 상태 onOpenURL · deferred 스트림)이라 진입 신호도 둘이다.
 //                             같은 링크가 양쪽으로 겹쳐 와도 진행 중 평가는 덮이지 않는다(presentGuestFeedback 가드).
 // depends-on: [[feedback#진입로와 닫기]] — 공유 링크(유니버설 링크 https + 개발용 hilit:// 스킴)가 게스트 평가를
@@ -68,6 +69,10 @@ struct AppFeature {
         @Presents var onboarding: OnboardingFeature.State?
         /// AI 면접 리포트 — 홈 위젯②의 [레포트 보기] 가 세션 id 로 연다. 자체 NavigationStack 을 가진 전면 흐름이라 cover.
         @Presents var report: ReportFeature.State?
+        /// 계정 정지 안내(A4) — 위저드의 세션 생성이 403 `ACCOUNT_SUSPENDED` 로 막히면 연다(HLT-54).
+        /// 위저드 cover **위에** 얹는다(`myPageReport` 와 같은 자리 나눔) — 위저드를 닫는 것과 동시에 새 cover 를
+        /// 띄우면 닫히는 전환과 겹쳐 present 가 묻힌다. [홈으로] 가 둘을 함께 닫는다.
+        @Presents var suspension: AuthSuspensionFeature.State?
         /// 업데이트 안내(강제·권장)의 근거 — «업데이트» 가 열 `storeUrl` 과 강제 여부를 여기서 읽는다.
         var updatePolicy: AppVersionPolicy?
         @Presents var updateAlert: AlertState<Action.UpdateAlert>?
@@ -109,6 +114,7 @@ struct AppFeature {
         case myPageReport(PresentationAction<ReportFeature.Action>)
         case onboarding(PresentationAction<OnboardingFeature.Action>)
         case report(PresentationAction<ReportFeature.Action>)
+        case suspension(PresentationAction<AuthSuspensionFeature.Action>)
         /// dev 데이터 초기화 완료 — 초기 State 로 리셋하고 Splash 판정부터 다시 태운다.
         case appDataCleared
         case binding(BindingAction<State>)
@@ -179,6 +185,9 @@ struct AppFeature {
         }
         .ifLet(\.$report, action: \.report) {
             ReportFeature()
+        }
+        .ifLet(\.$suspension, action: \.suspension) {
+            AuthSuspensionFeature()
         }
         .ifLet(\.$updateAlert, action: \.updateAlert)
     }

@@ -280,6 +280,20 @@ struct OnboardingPreloadFeatureTests {
         await store.receive(\.delegate.closeRequested)
     }
 
+    @Test("계정 정지(403)는 화면 상태 없이 코디네이터로 올린다")
+    func accountSuspendedDelegatesUp() async {
+        let store = TestStore(initialState: OnboardingPreloadFeature.State(data: fullData())) {
+            OnboardingPreloadFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.interviewClient.createSession = { _ in throw InterviewError.accountSuspended }
+        }
+
+        await store.send(.view(.onAppear)) { $0.hasStartedAnalysis = true }
+        await store.receive(\.inner.accountSuspended)
+        await store.receive(\.delegate.accountSuspended)
+    }
+
     @Test("실패가 아닐 때 [확인] 은 무시한다")
     func failureConfirmIgnoredOutsideFailure() async {
         let store = TestStore(initialState: OnboardingPreloadFeature.State(data: fullData())) {

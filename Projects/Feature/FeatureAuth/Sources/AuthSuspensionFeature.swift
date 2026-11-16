@@ -10,7 +10,8 @@ import Foundation
 
 // @lat: [[auth#가입 플로우]]
 /// AuthSuspension(A4) — 정지(블랙리스트) 계정이 면접 시작을 시도했을 때의 안내 화면.
-/// 진입은 면접 시작 게이트의 `ACCOUNT_SUSPENDED` 응답 — 발원지가 홈이라 제시는 AppFeature(cross-feature).
+/// 진입은 위저드 세션 생성의 403 `ACCOUNT_SUSPENDED` — 제시는 AppFeature(cross-feature, 위저드 cover 위).
+/// 기획은 «면접 시작 탭 시점» 이지만 서버에 사전 조회 API 가 없어 세션 생성 응답이 유일한 신호다.
 /// 정지는 면접 시작만 차단한다 — 로그인·레포트 열람·마이페이지·탈퇴는 정상(PRD Part7 확정).
 @Reducer
 public struct AuthSuspensionFeature {

@@ -87,6 +87,9 @@ public struct OnboardingFeature {
             case dismiss
             /// 온보딩 완료(프리로드까지 끝) — 준비된 세션 id 를 넘긴다. 부모가 Part2 진입 등으로 전환한다.
             case finished(sessionId: Int)
+            /// 세션 생성이 계정 정지(403 `ACCOUNT_SUSPENDED`)로 막혔다 — 위저드 위에 정지 안내(A4)를
+            /// 띄우는 건 부모 몫(정지 안내는 FeatureAuth 소속이라 cross-feature).
+            case accountSuspended
         }
     }
 
@@ -160,7 +163,7 @@ public struct OnboardingFeature {
                 }
 
             // 프리로드 — 완료면 세션 id 를 들고 위저드 종료, 연관성 실패·실패 모달 [확인] 이면 대표 프로젝트로
-            // 되돌림, 이용권 소진 [확인] 이면 이탈.
+            // 되돌림, 이용권 소진 [확인] 이면 이탈, 계정 정지면 부모에 위임.
             case let .path(.element(id: _, action: .preload(.delegate(action)))):
                 switch action {
                 case let .completed(sessionId):
@@ -186,6 +189,8 @@ public struct OnboardingFeature {
                     return .none
                 case .closeRequested:
                     return .send(.delegate(.dismiss))
+                case .accountSuspended:
+                    return .send(.delegate(.accountSuspended))
                 }
 
             // 4회 실패 다이얼로그 — 포폴 재업로드(STEP2 복귀) / 대표 프로젝트 없이 재분석.
