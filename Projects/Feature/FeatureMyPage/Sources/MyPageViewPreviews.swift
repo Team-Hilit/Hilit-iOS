@@ -78,6 +78,13 @@ import SwiftUI
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 
+#Preview("모달 — 삭제 불가(이번 달 삭제 한도)") {
+    var state = MyPageFeature.State.filled
+    state.availability = .init(deleteAvailable: false, nextDeleteAvailableAt: Date(timeIntervalSince1970: 1_798_729_200))
+    state.presentedModal = .deleteBlocked(.monthlyLimit)
+    return MyPageView(store: Store(initialState: state) { MyPageFeature() })
+}
+
 #Preview("모달 — 업로드 불가") {
     var state = MyPageFeature.State.filled
     state.availability = .init(replaceAvailable: false, nextReplaceAvailableAt: Date(timeIntervalSince1970: 1_798_729_200))

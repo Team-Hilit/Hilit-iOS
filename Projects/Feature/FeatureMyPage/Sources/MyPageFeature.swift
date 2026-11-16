@@ -142,7 +142,7 @@ public struct MyPageFeature {
     }
 
     /// 이 화면이 띄우는 모달 — 동시 표출을 타입으로 막는다(`.hilitModal(item:)` 규칙).
-    /// Figma «모달을 모아봤어요» 6개 인스턴스.
+    /// Figma «모달을 모아봤어요» 6개 인스턴스에 서버 삭제 한도(HLT-107) 판을 더한 것이다.
     /// 재업로드·삭제 가능 여부와 다시 가능한 날짜는 케이스에 싣지 않는다 — 카드가 `State.availability`
     /// 를 그대로 읽는다(서버 값 단일 소스, 모달이 떠 있는 동안 재조회가 와도 같은 값을 본다).
     public enum Modal: Equatable, Sendable {
@@ -158,10 +158,12 @@ public struct MyPageFeature {
         case loading
     }
 
-    /// 삭제를 막는 사유 — 지금은 진행 중 면접 하나(PRD).
+    /// 삭제를 막는 사유 — 진행 중 면접 + 이번 달 삭제 한도(서버 `DELETE_LIMIT_EXCEEDED`, HLT-107 — Android 와 같은 게이트).
     public enum DeleteBlockReason: Equatable, Sendable {
         /// 이 포폴을 쓰는 면접이 진행 중이다 (목록 `interviewInProgress` · 서버 `PORTFOLIO_DELETE_BLOCKED_BY_INTERVIEW`).
         case interviewInProgress
+        /// 이번 달 삭제 기회를 이미 썼다 (목록 `deleteAvailable == false` · 서버 `DELETE_LIMIT_EXCEEDED`).
+        case monthlyLimit
     }
 
     // MARK: - State
@@ -280,6 +282,8 @@ public struct MyPageFeature {
             case entryLoaded(UserProfile, PortfolioList, [InterviewReportSummary])
             /// 진입 조회를 다시 태워 달라 — 효과 클로저 안에서는 fetchEntry 를 못 불러 inner 로 돌아온다.
             case entryRefetchRequested
+            /// 서버가 삭제를 사유 있게 거절했다(409 — 면접 진행 중·이번 달 삭제 한도) — 차단 모달로 바꿔 띄운다.
+            case portfolioDeleteBlocked(DeleteBlockReason)
             case portfolioDeleteFailed
             case portfolioDeleted
             /// PDF 열람 URL 발급 실패 — 만료·비 READY·네트워크가 한 자리로 모인다.

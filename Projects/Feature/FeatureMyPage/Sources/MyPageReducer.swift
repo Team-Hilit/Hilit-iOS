@@ -130,9 +130,11 @@ extension MyPageFeature {
             }
 
         case .userTappedRemovePortfolio:
-            // 면접 중에는 지울 수 없다(PRD). 안내줄은 재업로드 가능 여부 고지.
+            // 삭제 게이트: 진행 중 면접 → 이번 달 삭제 한도(HLT-107). 놓친 건 서버 409 가 같은 모달로 닿는다.
             if state.isInterviewInProgress {
                 state.presentedModal = .deleteBlocked(.interviewInProgress)
+            } else if !state.availability.deleteAvailable {
+                state.presentedModal = .deleteBlocked(.monthlyLimit)
             } else {
                 state.presentedModal = .deleteConfirm
             }
@@ -164,6 +166,11 @@ extension MyPageFeature {
             state.isFilePickerPresented = true
             return .none
         }
+        // 교체 = READY 삭제 + 등록 — 삭제 게이트(면접 진행 중·삭제 한도)에 걸리면 지우기에서 막혀 409 로 끝난다.
+        guard !state.isInterviewInProgress, state.availability.deleteAvailable else {
+            state.presentedModal = .deleteBlocked(state.isInterviewInProgress ? .interviewInProgress : .monthlyLimit)
+            return .none
+        }
         state.presentedModal = state.availability.replaceAvailable ? .replaceConfirm : .replaceBlocked
         return .none
     }
@@ -179,8 +186,16 @@ extension MyPageFeature {
             return .run { send in
                 _ = try await portfolioClient.delete(file.id)
                 await send(.inner(.portfolioDeleted))
-            } catch: { _, send in
-                await send(.inner(.portfolioDeleteFailed))
+            } catch: { error, send in
+                // 사유 있는 409 는 차단 모달로, 나머지는 일반 실패 알럿으로.
+                switch error as? PortfolioError {
+                case .deleteLimitExceeded?:
+                    await send(.inner(.portfolioDeleteBlocked(.monthlyLimit)))
+                case .deleteBlockedByInterview?:
+                    await send(.inner(.portfolioDeleteBlocked(.interviewInProgress)))
+                default:
+                    await send(.inner(.portfolioDeleteFailed))
+                }
             }
         case .replaceConfirm:
             state.isFilePickerPresented = true
@@ -280,6 +295,7 @@ extension MyPageFeature {
             state.portfolioPreview = .init(url: url)
             return .none
 
+        case let .portfolioDeleteBlocked(reason): return presentServerDeleteBlock(&state, reason)
 
         case .portfolioDeleteFailed:
             state.alert = .plain(message: "잠시 후 다시 시도해 주세요.")
@@ -323,6 +339,16 @@ extension MyPageFeature {
             state.isPortfolioTooltipPresented = true
             return .none
         }
+    }
+
+    /// 서버의 사유 있는 삭제 거절 — 낡은 목록 값을 고치고 날짜는 재조회가 채운다.
+    private func presentServerDeleteBlock(_ state: inout State, _ reason: DeleteBlockReason) -> Effect<Action> {
+        switch reason {
+        case .interviewInProgress: state.isInterviewInProgress = true
+        case .monthlyLimit: state.availability.deleteAvailable = false
+        }
+        state.presentedModal = .deleteBlocked(reason)
+        return fetchEntry()
     }
 
     // MARK: - effects

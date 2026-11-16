@@ -45,6 +45,19 @@ struct MyPageModalCard: View {
                 buttons(cancel: "취소", confirm: "확인")
             }
 
+        // 시안 없음 — 면접 진행 중 판(435:8893)과 같은 틀에 사유·날짜만 바꿔 끼운다. 카피 임시.
+        case .deleteBlocked(.monthlyLimit):
+            Modal(
+                "포트폴리오를 삭제할 수 없어요",
+                subText: "포트폴리오 삭제는 한 달에 한 번만 할 수 있어요.",
+                info: availability.nextDeleteAvailableAt
+                    .map { "\(PortfolioAvailability.dayText($0))부터 다시 삭제할 수 있어요" }
+                    ?? "이번 달 남은 삭제 기회 0번",
+                infoStyle: .error
+            ) {
+                buttons(cancel: "취소", confirm: "확인")
+            }
+
         case .replaceConfirm:
             // @ds(component): 안내줄 아이콘 coupon/16px — Modal 의 info 는 InfoField(.gray)(원 안 i) 고정이라
             //                 시안의 티켓 아이콘이 안 나온다
@@ -117,6 +130,18 @@ private let previewNextMonth = Date(timeIntervalSince1970: 1_798_729_200) // 202
     Color.GrayScale.g50
         .hilitModal(isPresented: true) {
             MyPageModalCard(modal: .deleteBlocked(.interviewInProgress), availability: .init(), onCancel: {}, onConfirm: {})
+        }
+}
+
+#Preview("삭제 불가 — 이번 달 삭제 한도") {
+    Color.GrayScale.g50
+        .hilitModal(isPresented: true) {
+            MyPageModalCard(
+                modal: .deleteBlocked(.monthlyLimit),
+                availability: .init(deleteAvailable: false, nextDeleteAvailableAt: previewNextMonth),
+                onCancel: {},
+                onConfirm: {}
+            )
         }
 }
 
