@@ -89,7 +89,7 @@ OnboardingData — 위저드가 스텝을 거치며 채우는 공유 페이로�
 
 PRD §4.4 — 입력을 로컬 draft 로 자동 저장해 **앱 진짜 종료(kill/크래시) 시 재입력 방지**(백그라운드 전환은 프로세스 생존이라 무관). **재개식**: 값 + 위저드 위치 복원.
 
-`OnboardingDraftStore` seam(UserDefaults JSON — (지금은 DomainPortfolio 로 승격한) PortfolioFileReader 처럼 로컬 IO, testValue unimplemented). OnboardingData 는 Codable + portfolioFileName. 코디네이터가 각 스텝 완료마다 `persist`(data·furthestStep=path.count+1·savedAt) 저장, 폐기는 위저드가 아니라 **인터뷰 세션 완료 시 AppFeature 가 clear**(세션 생성 시점에 지우면 면접 도중 킬·이탈에 값이 사라지고 홈의 재사용·[수정하기] 복원도 끊긴다 → [[app]]). onAppear 는 **위저드 수명당 1회**(`didAttemptRestore` 가드) TTL 14일 안 draft 를 복원 — 프리로드(4) 제외 대표 프로젝트(3)까지 되쌓고, JD 는 루트라 `restoring:` init 으로 되살린다. 1회 가드가 필수인 이유: 루트 onAppear 는 뒤로가기로 루트 복귀 때마다 재발동하는데, 가드가 `path.isEmpty` 뿐이면 pop 으로 스택이 빈 순간 draft 를 다시 되쌓아 화면이 앞으로 튄다. 잔여: 포폴 삭제 시 clear.
+`OnboardingDraftStore` seam(UserDefaults JSON — (지금은 DomainPortfolio 로 승격한) PortfolioFileReader 처럼 로컬 IO, testValue unimplemented). OnboardingData 는 Codable + portfolioFileName. 코디네이터가 각 스텝 완료마다 `persist`(data·furthestStep=path.count+1·savedAt) 저장, 폐기는 위저드가 아니라 **인터뷰 세션 완료 시 AppFeature 가 clear**(세션 생성 시점에 지우면 면접 도중 킬·이탈에 값이 사라지고 홈의 재사용·[수정하기] 복원도 끊긴다 → [[app]]). 로그아웃·탈퇴도 AppFeature 가 지운다 → [[app#계정 로컬 정리]]. onAppear 는 **위저드 수명당 1회**(`didAttemptRestore` 가드) TTL 14일 안 draft 를 복원 — 프리로드(4) 제외 대표 프로젝트(3)까지 되쌓고, JD 는 루트라 `restoring:` init 으로 되살린다. 1회 가드가 필수인 이유: 루트 onAppear 는 뒤로가기로 루트 복귀 때마다 재발동하는데, 가드가 `path.isEmpty` 뿐이면 pop 으로 스택이 빈 순간 draft 를 다시 되쌓아 화면이 앞으로 튄다. 잔여: 포폴 삭제 시 clear.
 
 ## 재진입 분기
 

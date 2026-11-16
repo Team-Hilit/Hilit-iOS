@@ -172,7 +172,9 @@ extension AppFeature {
         firstLaunchStore.markLaunched()
     }
 
-    /// 로컬 저장소 정리 — 첫 실행 정리와 로그아웃이 공유한다. 서버 호출은 하지 않는다.
+    /// 로컬 저장소 정리 — 첫 실행 정리와 dev 데이터 초기화가 공유한다. 서버 호출은 하지 않는다.
+    /// 로그아웃·탈퇴는 이걸 쓰지 않는다 — 토큰은 `AuthClient.logout` 이 이미 지웠고, 계정 단위 정리는
+    /// `clearAccountLocalData()` 몫이다.
     ///
     /// Keychain 은 `tokenStore.clear()`(항목 하나)가 아니라 **전체**를 지운다 — 목적이 «앱이 남긴 것
     /// 전부» 라 Keychain 항목이 늘어도 놓치지 않아야 한다. UserDefaults 는 도메인째 지우지 않는다:
@@ -180,6 +182,27 @@ extension AppFeature {
     func clearLocalData() {
         KeychainWipe.wipeAll()
         draftStore.clear()
+    }
+
+    // MARK: - 계정 로컬 정리 → [[app#계정 로컬 정리]]
+
+    /// 로그아웃·탈퇴 — 이전 계정의 면접 로컬 데이터를 전부 지운다(HLT-111, Android 와 동일).
+    /// 보관값([이어서 진행] 재료)·온보딩 draft 는 본문에서 동기로 지운다 — 루트가 곧바로 바뀌므로
+    /// effect 로 미루면 다음 로그인이 그 사이 값을 읽을 여지가 남는다. 녹화 파일만 async 라 effect 다.
+    ///
+    /// 녹화는 discard → purge 순서다. 같은 프로세스 보관 세션(면접 중단 → 홈 → 로그아웃)은 원장이 아직
+    /// 그 세션을 쥐고 있어 purge 가 no-op 이다 — discard 가 원장 세그먼트를 지우고 원장을 비운 뒤라야
+    /// purge 가 죽은 프로세스의 잔존 파일까지 걷는다. 로그아웃은 홈 위 마이페이지에서만 나서 진행 중 녹화는 없다.
+    /// 서버 세션은 닫지 않는다 — abandon USER_EXIT 는 리포트 생성=차감을 트리거하고, 남은 세션은 hold 만료로 끝난다.
+    /// 업로드 큐(완주 면접의 영상)는 건드리지 않는다 — 지우면 이미 끝난 면접의 리포트 영상이 영영 빠진다.
+    func clearAccountLocalData() -> Effect<Action> {
+        let heldSessionId = heldSessionStore.load()?.sessionId
+        heldSessionStore.clear()
+        draftStore.clear()
+        return .run { [recordingClient] _ in
+            await recordingClient.discardRecording()
+            if let heldSessionId { await recordingClient.purgeRecordings(heldSessionId) }
+        }
     }
 
     // MARK: - 복귀 시점 보관값 검증

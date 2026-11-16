@@ -294,12 +294,13 @@ extension AppFeature {
             return .send(.home(.view(.onAppear)))
 
         // 세션 종료 두 신호 — 마이페이지가 서버 호출과 로컬 토큰 정리까지 끝낸 뒤 통보한다(완료형).
-        // 여기서 할 일은 라우팅뿐이다: 이전 사용자의 화면·데이터를 전부 버리고 로그인부터 다시 —
-        // 로그인 성공(`.auth` → 초기 State + home)의 대칭이다.
+        // 이전 사용자의 화면·데이터를 전부 버리고 로그인부터 다시 — 로그인 성공(`.auth` → 초기 State + home)의 대칭이다.
+        // 면접 로컬 데이터(보관값·draft·녹화 잔존 파일)도 여기서 걷는다 — 토큰만 지우면 다음 계정 홈에
+        // 이전 계정의 [이어서 진행] 카드와 draft 가 그대로 뜬다(HLT-111, Android 와 동일).
         case .presented(.delegate(.loggedOut)), .presented(.delegate(.withdrawn)):
             state = State()
             state.root = .auth
-            return .none
+            return clearAccountLocalData()
 
         // 리포트 줄의 두 버튼 — 행 id = 세션 id 라 홈 위젯②와 재료가 같다.
         // 마이페이지는 **닫지 않고 그 위에 얹는다**: 목록에서 들어왔으니 닫으면 목록이 도착지다.

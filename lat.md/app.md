@@ -39,7 +39,7 @@
 대표 흐름 — **마이페이지 → 세션 종료** (2026-08-08):
 1. 홈 내비바 프로필이 `delegate(.profileRequested)` 방출 → `state.myPage = MyPageFeature.State()` 로 fullScreenCover 제시. 자체 상단 바를 얹는 한 장짜리 화면이라 NavigationStack 없이 덮는다
 2. 닫기(`closeRequested`)는 cover 를 닫고 **홈을 다시 태운다** — 마이페이지에서 포폴을 지우거나 새로 올렸을 수 있고 「면접 시작」 카드가 그 값에 얹혀 있다(온보딩 이탈과 같은 이유)
-3. 로그아웃·탈퇴는 마이페이지가 서버 호출과 로컬 토큰 정리까지 끝낸 뒤 **완료형**(`loggedOut`/`withdrawn`)으로 통보한다 — AppFeature 는 라우팅만 한다: `state = State()` + `root = .auth`(로그인 성공의 대칭) → [[mypage#주의사항]]
+3. 로그아웃·탈퇴는 마이페이지가 서버 호출과 로컬 토큰 정리까지 끝낸 뒤 **완료형**(`loggedOut`/`withdrawn`)으로 통보한다 — AppFeature 는 `state = State()` + `root = .auth`(로그인 성공의 대칭)로 되돌리고, 면접 로컬 데이터를 걷는다 → [[app#계정 로컬 정리]] · [[mypage#주의사항]]
 
 대표 흐름 — **마이페이지 리포트 줄 → 리포트·링크 생성** (2026-08-10):
 1. 리포트 줄 두 버튼이 `delegate(.reportRequested(id:))`·`delegate(.feedbackRequested(id:))` 로 올라온다 — 행 id 가 곧 세션 id 라 홈 위젯②와 재료가 같다(→ [[mypage#주의사항]])
@@ -59,6 +59,18 @@
 - **마커는 정리를 마친 뒤 찍는다** — 사이에서 앱이 죽으면 다음 실행이 다시 첫 실행으로 판정돼 정리를 끝내는데, 먼저 찍으면 지우다 만 상태로 굳는다.
 - **정리가 세션 판정보다 먼저** — `onAppear` 가 정리 effect 를 돌리고 `firstLaunchResolved` 로 갈라 그때 판정을 시작한다. 같은 effect 안에서 이으면 순서가 코드 배치에 묻힌다. 같은 `merge` 에 나란히 걸리는 나머지 둘(미완 업로드 재개 — [[interview#업로드 큐]] · 앱 사망 세션 정리 — [[app#Cross-feature Routing]])은 그 순서에 얽히지 않아 함께 뿌린다.
 - 정리 함수는 **dev 데이터 초기화 버튼과 공유**한다 — 지울 로컬 목록이 두 곳에서 갈라지면 한쪽만 늘어난다.
+
+## 계정 로컬 정리
+
+로그아웃·탈퇴 때 이전 계정의 면접 로컬 데이터를 지운다(HLT-111, Android 와 동일). 토큰만 지우면 다음 계정 홈에 이전 계정의 [이어서 진행] 카드와 온보딩 draft 가 그대로 뜬다.
+
+- **대상** — `AppFeature.clearAccountLocalData()`: 보관값(`HeldSessionStore` — [[home#진입 로드]]의 [이어서 진행] 재료)·온보딩 draft([[onboarding#입력 draft]])·녹화 파일. 토큰은 마이페이지가 `AuthClient.logout` 으로 이미 지웠다.
+- **녹화는 `discardRecording` → `purgeRecordings` 순서** — 같은 프로세스 보관 세션(면접 중단 → 홈 → 로그아웃)은 원장이 그 세션을 쥐고 있어 purge 가 no-op 이다. discard 가 원장을 비운 뒤라야 purge 가 죽은 프로세스의 잔존 파일까지 걷는다.
+- **보관값·draft 는 리듀서 본문에서 동기로** 지운다 — 루트가 같은 액션에서 로그인으로 바뀌므로, effect 로 미루면 정리 전에 다음 로그인이 값을 읽을 여지가 남는다. 녹화 파일만 async 라 effect 다.
+- **서버 세션은 닫지 않는다** — abandon USER_EXIT 는 리포트 생성=차감을 트리거한다. 남은 세션은 서버 hold 만료로 끝난다.
+- **업로드 큐는 대상이 아니다** — 큐에 든 건 이미 완주한 면접의 영상이라, 지우면 그 리포트의 영상이 영영 빠진다([[interview#업로드 큐]]).
+- **세션 만료(sessionExpired) 로그인 복귀는 대상이 아니다** — 대개 같은 사용자가 다시 로그인해 재개 재료를 살려야 한다. 다른 계정이 들어오면 보관값이 남는 잔여가 있다(후속).
+- [[app#첫 실행 정리]]의 `clearLocalData()` 와 따로 둔다 — 그쪽은 Keychain 전체를 지우는 «설치 단위» 정리고, 이쪽은 «계정 단위» 정리다.
 
 ## Splash 세션 복구
 
