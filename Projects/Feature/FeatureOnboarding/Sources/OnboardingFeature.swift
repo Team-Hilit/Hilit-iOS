@@ -159,7 +159,8 @@ public struct OnboardingFeature {
                     return .send(.delegate(.dismiss))
                 }
 
-            // 프리로드 — 완료면 세션 id 를 들고 위저드 종료, 연관성 실패면 대표 프로젝트로 되돌림, X 면 이탈.
+            // 프리로드 — 완료면 세션 id 를 들고 위저드 종료, 연관성 실패·실패 모달 [확인] 이면 대표 프로젝트로
+            // 되돌림, 이용권 소진 [확인] 이면 이탈.
             case let .path(.element(id: _, action: .preload(.delegate(action)))):
                 switch action {
                 case let .completed(sessionId):
@@ -177,6 +178,11 @@ public struct OnboardingFeature {
                         // 그 전까지는 경고 문구와 함께 재입력을 유도한다.
                         setMainProjectWarning(&state, Self.relevanceWarningMessage)
                     }
+                    return .none
+                case .retryRequested:
+                    // HLT-36 — 실패 모달 [확인] 은 집중 프로젝트로 돌아간다(Android 와 동일). 거기서 다시
+                    // «계속하기» 를 누르면 새 프리로드가 세션을 새로 만든다. 연관성 카운트는 건드리지 않는다.
+                    _ = state.path.popLast()
                     return .none
                 case .closeRequested:
                     return .send(.delegate(.dismiss))

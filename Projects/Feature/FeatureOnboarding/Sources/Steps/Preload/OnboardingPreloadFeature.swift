@@ -19,6 +19,8 @@ import DomainJDInterface
 /// 전환**(filling)을 거쳐 완료 화면 → 유지 시간 경과 → delegate(.completed(sessionId:))로 세션을
 /// 코디네이터에 넘긴다 — dismiss·Part2 진입은 코디네이터 몫. READY 를 받자마자 넘기지 않는 이유가
 /// 이 전환이다.
+/// 실패는 화면 위 **모달**로 알린다(HLT-36 — Android 와 같은 «확인 → 집중 프로젝트» 복귀). 준비 중 이탈
+/// 경로(X)는 두지 않는다 — 모달의 [확인] 이 유일한 출구다.
 @Reducer
 public struct OnboardingPreloadFeature {
     /// 세션 준비 상태 폴링 주기 — InterviewClient 가이드(3~5초)의 하한.
@@ -34,10 +36,13 @@ public struct OnboardingPreloadFeature {
     /// 그린 사면이 올라와 화면을 덮는 시간. View 의 사면 애니메이션과 **같은 값을 써야** 완료 문구가
     /// 다 덮인 뒤에 나온다 — 그래서 Duration 이 아니라 초(Double)로 두고 양쪽이 공유한다.
     static let fillSeconds: Double = 0.9
-    /// 세션 생성/폴링 실패 문구 — 재시도 없음(PRD §3.1), X 로 이탈해 처음부터.
-    static let failureMessage = "면접 준비에 실패했어요.\n잠시 후 다시 시도해 주세요."
+    /// 세션 생성/폴링 실패 문구 — 재시도 버튼은 없다(PRD §3.1). [확인] 이 집중 프로젝트로 되돌리고,
+    /// 다시 «계속하기» 를 누르면 세션을 새로 만든다.
+    static let failureMessage = "잠시 후 다시 시도해 주세요."
+    /// 이용권 소진(403 `NO_REMAINING_TICKET`) 문구 — 위저드 안에선 풀 수 없어 [확인] 이 위저드를 닫는다.
+    static let noRemainingTicketMessage = "남은 이용권이 없어요."
     /// 수집 데이터가 불완전해 세션 입력을 만들지 못한 경우 — 위저드 순서상 정상 진입이면 발생하지 않는다.
-    static let configMissingMessage = "면접 준비에 필요한 정보가 부족해요.\n처음부터 다시 시도해 주세요."
+    static let configMissingMessage = "면접 준비에 필요한 정보가 부족해요.\n다시 시도해 주세요."
 
     @ObservableState
     public struct State: Equatable {
@@ -47,8 +52,24 @@ public struct OnboardingPreloadFeature {
             /// 그린 사면이 올라와 화면을 덮는 구간 — 분석 텍스트는 사라지고 완료 문구는 아직 없다.
             case filling
             case completed
-            /// 세션 생성·폴링 실패. 사용자 노출 문구를 동봉한다.
-            case failed(message: String)
+            /// 세션 생성·폴링 실패 — 분석 판 위에 실패 모달을 띄운다. [확인] 의 갈래는 `Failure` 가 정한다.
+            case failed(Failure)
+        }
+
+        /// 실패 종류 — 모달 문구와 [확인] 의 목적지가 함께 갈린다.
+        public enum Failure: Equatable, Sendable {
+            /// 일반 실패 — [확인] 이 집중 프로젝트로 되돌린다(거기서 «계속하기» = 새 세션 생성).
+            case retry(message: String)
+            /// 이용권 소진 — 위저드 안에선 풀 수 없어 [확인] 이 위저드를 닫는다(홈이 소진 안내를 그린다).
+            case noRemainingTicket
+
+            /// 모달 서브 문구.
+            public var message: String {
+                switch self {
+                case let .retry(message): message
+                case .noRemainingTicket: OnboardingPreloadFeature.noRemainingTicketMessage
+                }
+            }
         }
 
         /// 앞선 스텝들이 수집한 공유 페이로드 — 세션 생성 입력. 코디네이터가 주입한다.
@@ -79,7 +100,8 @@ public struct OnboardingPreloadFeature {
         /// 사용자 입력·생명주기. View 의 send(...) 로만 방출된다.
         public enum View: Equatable, Sendable {
             case onAppear
-            case userTappedClose
+            /// 실패 모달 [확인] — 실패 종류에 따라 집중 프로젝트 복귀 또는 위저드 이탈.
+            case userTappedFailureConfirm
         }
 
         /// effect 결과·리듀서 내부 신호. 리듀서만 방출한다.
@@ -89,8 +111,8 @@ public struct OnboardingPreloadFeature {
             case sessionCreated(InterviewSessionCreated)
             /// GET /interview/sessions/{id}/status 폴링 응답.
             case statusPolled(InterviewSessionStatus)
-            /// 세션 생성·폴링 실패 — 실패 화면으로 전환.
-            case analysisFailed(message: String)
+            /// 세션 생성·폴링 실패 — 실패 모달로 전환.
+            case analysisFailed(State.Failure)
             /// 집중 프로젝트 연관성 부족(FREETEXT_NOT_RELEVANT) — 코디네이터가 집중 프로젝트로 되돌린다.
             case relevanceCheckFailed
             /// 서버 JD 검증 캐시 만료(JD_NOT_VALIDATED) — 저장된 링크로 재검증 복구를 시도한다.
@@ -114,7 +136,9 @@ public struct OnboardingPreloadFeature {
             case completed(sessionId: Int)
             /// 집중 프로젝트 연관성 부족 — 코디네이터가 집중 프로젝트 스텝으로 pop-back 한다 (PRD S3.5).
             case relevanceCheckFailed
-            /// 온보딩 이탈(X) 요청 — dismiss 는 코디네이터 몫.
+            /// 실패 모달 [확인](일반 실패) — 코디네이터가 집중 프로젝트로 pop-back 한다(HLT-36).
+            case retryRequested
+            /// 이용권 소진 모달 [확인] — 위저드 이탈. dismiss 는 코디네이터 몫.
             case closeRequested
         }
     }
@@ -146,7 +170,7 @@ public struct OnboardingPreloadFeature {
             guard !state.hasStartedAnalysis else { return .none }
             state.hasStartedAnalysis = true
             guard let config = state.data.interviewConfig() else {
-                return .send(.inner(.analysisFailed(message: Self.configMissingMessage)))
+                return .send(.inner(.analysisFailed(.retry(message: Self.configMissingMessage))))
             }
             return .merge(
                 startSession(config: config),
@@ -160,8 +184,14 @@ public struct OnboardingPreloadFeature {
                 .cancellable(id: CancelID.stageTimer)
             )
 
-        case .userTappedClose:
-            return .send(.delegate(.closeRequested))
+        case .userTappedFailureConfirm:
+            guard case let .failed(failure) = state.phase else { return .none }
+            switch failure {
+            case .retry:
+                return .send(.delegate(.retryRequested))
+            case .noRemainingTicket:
+                return .send(.delegate(.closeRequested))
+            }
         }
     }
 
@@ -174,8 +204,8 @@ public struct OnboardingPreloadFeature {
         case let .statusPolled(status):
             return reduceStatus(&state, status)
 
-        case let .analysisFailed(message):
-            state.phase = .failed(message: message)
+        case let .analysisFailed(failure):
+            state.phase = .failed(failure)
             return .cancel(id: CancelID.stageTimer)
 
         case .relevanceCheckFailed:
@@ -190,7 +220,7 @@ public struct OnboardingPreloadFeature {
 
         case .sessionRetryRequested:
             guard let config = state.data.interviewConfig() else {
-                return .send(.inner(.analysisFailed(message: Self.configMissingMessage)))
+                return .send(.inner(.analysisFailed(.retry(message: Self.configMissingMessage))))
             }
             return startSession(config: config)
 
@@ -245,11 +275,11 @@ public struct OnboardingPreloadFeature {
                 try await clock.sleep(for: Self.pollInterval)
                 await send(.inner(.statusPolled(try await interviewClient.sessionStatus(sessionId))))
             } catch: { _, send in
-                await send(.inner(.analysisFailed(message: Self.failureMessage)))
+                await send(.inner(.analysisFailed(.retry(message: Self.failureMessage))))
             }
             .cancellable(id: CancelID.session)
         case .failed:
-            state.phase = .failed(message: Self.failureMessage)
+            state.phase = .failed(.retry(message: Self.failureMessage))
             return .cancel(id: CancelID.stageTimer)
         }
     }
@@ -259,25 +289,26 @@ public struct OnboardingPreloadFeature {
     /// 재검증해도 invalid 이거나 링크가 아니면(직접 입력·스킵) 복구 불가 — 실패 처리.
     private func recoverFromJDExpiry(_ state: inout State) -> Effect<Action> {
         guard !state.didRetryJDValidation else {
-            return .send(.inner(.analysisFailed(message: Self.failureMessage)))
+            return .send(.inner(.analysisFailed(.retry(message: Self.failureMessage))))
         }
         state.didRetryJDValidation = true
         guard case let .link(jdURL) = state.data.jd else {
-            return .send(.inner(.analysisFailed(message: Self.failureMessage)))
+            return .send(.inner(.analysisFailed(.retry(message: Self.failureMessage))))
         }
         return .run { send in
             let validation = try await jdClient.validate(jdURL)
             await send(.inner(validation.valid
                 ? .sessionRetryRequested
-                : .analysisFailed(message: Self.failureMessage)))
+                : .analysisFailed(.retry(message: Self.failureMessage))))
         } catch: { _, send in
-            await send(.inner(.analysisFailed(message: Self.failureMessage)))
+            await send(.inner(.analysisFailed(.retry(message: Self.failureMessage))))
         }
         .cancellable(id: CancelID.session)
     }
 
     /// 세션 생성 요청 — onAppear 최초 시도와 JD 재검증 후 재시도가 공유한다.
-    /// 에러는 종류별로 분기한다: 연관성 부족 → 코디네이터 pop-back, JD 검증 만료 → 재검증 복구, 그 외 → 실패.
+    /// 에러는 종류별로 분기한다: 연관성 부족 → 코디네이터 pop-back, JD 검증 만료 → 재검증 복구,
+    /// 이용권 소진 → 위저드 이탈 모달, 그 외 → 실패 모달.
     private func startSession(config: InterviewConfig) -> Effect<Action> {
         .run { send in
             await send(.inner(.sessionCreated(try await interviewClient.createSession(config))))
@@ -287,8 +318,10 @@ public struct OnboardingPreloadFeature {
                 await send(.inner(.relevanceCheckFailed))
             case .jdNotValidated?:
                 await send(.inner(.jdValidationExpired))
+            case .noRemainingTicket?:
+                await send(.inner(.analysisFailed(.noRemainingTicket)))
             default:
-                await send(.inner(.analysisFailed(message: Self.failureMessage)))
+                await send(.inner(.analysisFailed(.retry(message: Self.failureMessage))))
             }
         }
         .cancellable(id: CancelID.session)
@@ -299,7 +332,7 @@ public struct OnboardingPreloadFeature {
         .run { send in
             await send(.inner(.statusPolled(try await interviewClient.sessionStatus(sessionId))))
         } catch: { _, send in
-            await send(.inner(.analysisFailed(message: Self.failureMessage)))
+            await send(.inner(.analysisFailed(.retry(message: Self.failureMessage))))
         }
         .cancellable(id: CancelID.session)
     }

@@ -65,7 +65,7 @@ STEP 3 (선택 — 마지막 수집 스텝, 프로그레스 3/3). 300자 자유 
 
 종결 화면 (프로그레스·뒤로가기 없음, 다크 풀스크린). 코디네이터가 누적 OnboardingData 를 init 으로 주입 — 서버 제출 지점(세션 생성+폴링). 체크리스트 3행은 순차 진행 — 1·2행은 가짜 타이머(1.2s), 3행만 가짜 완료 AND 세션 READY 로 체크. 잠깐 노출 후 채우기 전환 → 완료 화면 → delegate(.completed).
 
-**네비바는 준비 구간 내내 감춘다**(사용자 결정 2026-08-04 — 기다리는 것 말곤 할 게 없는 화면): `leading: .hidden` 만으로는 iOS 26 이 빈 슬롯에 글래스 캡슐을 그려 좌상단에 흐린 원이 남아, `.toolbar(.hidden, for: .navigationBar)` 로 바를 끈다(모디파이어 교체가 아니라 값만 바꿔 애니메이션 유지). X 는 실패 판에서만 살아나고(재시도 없음 → 이탈이 유일한 출구) 그 pop 이 effect 를 자동 취소한다 — 스와이프백도 막혀 있어 **준비 중 이탈 경로는 없다**.
+**네비바는 준비 구간 내내 감춘다**(사용자 결정 2026-08-04 — 기다리는 것 말곤 할 게 없는 화면): `leading: .hidden` 만으로는 iOS 26 이 빈 슬롯에 글래스 캡슐을 그려 좌상단에 흐린 원이 남아, `.toolbar(.hidden, for: .navigationBar)` 로 바를 끈다(모디파이어 교체가 아니라 값만 바꿔 애니메이션 유지). X 는 없다 — 실패도 판 위 **모달**(`.hilitModal(item:)` + `Modal`, 시안 미출)로 알리고 [확인] 이 유일한 출구다(HLT-36). 스와이프백도 막혀 있어 **준비 중 이탈 경로는 없다**.
 
 READY 를 받아도 곧장 넘기지 않는다 — `phase` 에 `filling` 을 두어 **그린 사면이 위로 올라와 화면을 덮는 0.9초**(`fillSeconds`)를 끼운다(시안 443:9881 전면 그린). 판을 갈아끼우지 않고 같은 사면의 높이만 키우는 이유는 두 시안이 같은 두 색 그라데이션이어서 — 그라데이션이 판과 함께 늘어나면 색이 튀는 지점이 없다. 글자는 0.3초로 먼저 지고, 완료 문구는 리듀서가 같은 값을 센 뒤(`fillFinished`) 올라온다.
 
@@ -74,9 +74,10 @@ READY 를 받아도 곧장 넘기지 않는다 — `phase` 에 `filling` 을 두
 이 화면이 곧 대기 표시라 **전역 로딩을 얹지 않는다** — `InterviewClient.createSession`·`.sessionStatus` liveValue 에 `GlobalLoadingSuppression.run` 을 건다. AppView 가 Splash 계열 루트를 제외하는 것과 같은 이유(브랜드 대기 화면을 로딩 판이 가린다) → [[domain.map#네트워킹 인프라]] · [[app#Splash 세션 복구]]
 
 세션 생성 연결 = PRD S3.5+S4. → [[interview#Client 계약]]
-- ① OnboardingData.interviewConfig() → InterviewClient.createSession + sessionStatus 폴링(3초) ✅. `.domain(interface: .interview)` 의존. PROCESSING→폴링, READY→completed(sessionId), 실패→failed 화면(재시도 없음), config 불완전→failed. onAppear 가드로 중복 시작 방지. CancelID.session 으로 pop 시 취소. createSession effect 는 `startSession(config:)` 로 추출해 최초 시도와 JD 재검증 후 재시도가 공유. **config 불완전 = portfolioId 부재뿐**(2026-08-04) — 위저드 순서상 프리로드 진입이면 항상 채워져 있어 사실상 안 타는 방어선이다. 직군·연차 nil 검사는 제거했다(서버 프로필 스냅샷 — 위 서문).
-- ①-JD 검증 만료 자동 복구 ✅ — 서버 JD 검증 캐시는 단명이라 오래된 draft 로 재개하면 createSession 이 `JD_NOT_VALIDATED` 로 거부된다(draft 는 jd 를 영구 유효로 착각). 이때 죽지 않고 저장된 `.link` 를 `JDClient.validate` 로 **1회**(`didRetryJDValidation` 가드) 재검증→valid 면 세션 생성 재시도, invalid/링크 아님이면 failed. 원칙: draft=재개 힌트·서버=진실, 서버 부작용 값은 직전에 서버와 화해. `.domain(interface: .jd)` 의존. → [[api#Interview]]
+- ① OnboardingData.interviewConfig() → InterviewClient.createSession + sessionStatus 폴링(3초) ✅. `.domain(interface: .interview)` 의존. PROCESSING→폴링, READY→completed(sessionId), 실패→failed 모달(재시도 없음), config 불완전→failed. onAppear 가드로 중복 시작 방지. CancelID.session 으로 pop 시 취소. createSession effect 는 `startSession(config:)` 로 추출해 최초 시도와 JD 재검증 후 재시도가 공유. **config 불완전 = portfolioId 부재뿐**(2026-08-04) — 위저드 순서상 프리로드 진입이면 항상 채워져 있어 사실상 안 타는 방어선이다. 직군·연차 nil 검사는 제거했다(서버 프로필 스냅샷 — 위 서문).
+- ①-JD 검증 만료 자동 복구 ✅ — 서버 JD 검증 캐시는 단명이라 오래된 draft 로 재개하면 createSession 이 `JD_CONTENT_NOT_FOUND`(캐시 6시간 만료)·`JD_NOT_VALIDATED` 로 거부된다 — 둘 다 `jdNotValidated` 로 매핑(draft 는 jd 를 영구 유효로 착각). 이때 죽지 않고 저장된 `.link` 를 `JDClient.validate` 로 **1회**(`didRetryJDValidation` 가드) 재검증→valid 면 세션 생성 재시도, invalid/링크 아님이면 failed. 원칙: draft=재개 힌트·서버=진실, 서버 부작용 값은 직전에 서버와 화해. `.domain(interface: .jd)` 의존. → [[api#Interview]]
 - ④ READY → delegate(.completed(sessionId)) → 코디네이터 delegate(.finished(sessionId:)) ✅. AppFeature 미배선이라 요약 질문 등 payload 확장은 배선 시.
+- ①-실패 모달 ✅(2026-11-12, HLT-36) — `Phase.failed(Failure)`: 일반 실패(`.retry`)의 [확인] 은 `delegate(.retryRequested)` → 코디네이터가 프리로드를 pop 해 **대표 프로젝트로 복귀**(Android 와 동일, 연관성 카운트 불변) — 거기서 «계속하기» 가 새 세션을 만든다. 이용권 소진(403 `noRemainingTicket`)은 위저드로 풀 수 없어 [확인] 이 `closeRequested` → 이탈. 폴링 도중 실패로 버려진 세션은 지우지 않는다 — 시작 전 세션에 abandon(USER_EXIT)을 쏘면 리포트 생성을 트리거한다([[app#Cross-feature Routing]] 3번).
 - ② 연관성 실패 처리 ✅ — `FREETEXT_NOT_RELEVANT` 를 DomainInterview 가 `InterviewError.freeTextNotRelevant` 로 매핑, 프리로드가 delegate(.relevanceCheckFailed) → 코디네이터가 프리로드 popLast + relevanceFailureCount++.
 - ③ 재입력 유도 ✅ — 4회 미만은 대표 프로젝트에 경고 문구 주입(편집 시 해제), **4회째**는 코디네이터의 `ConfirmationDialogState` 2선택지([포폴 다시 올리기→STEP2 pop] / [대표 프로젝트 없이 진행→freeText=nil 재분석]).
 

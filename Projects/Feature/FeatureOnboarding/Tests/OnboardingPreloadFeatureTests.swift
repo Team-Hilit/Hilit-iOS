@@ -110,7 +110,7 @@ struct OnboardingPreloadFeatureTests {
         await store.receive(\.delegate.relevanceCheckFailed)
     }
 
-    @Test("세션 생성 실패는 실패 화면으로 전환한다 (재시도 없음)")
+    @Test("세션 생성 실패는 실패 모달로 전환한다 (재시도 없음)")
     func analysisFailsOnCreateError() async {
         let store = TestStore(initialState: OnboardingPreloadFeature.State(data: fullData())) {
             OnboardingPreloadFeature()
@@ -121,7 +121,7 @@ struct OnboardingPreloadFeatureTests {
 
         await store.send(.view(.onAppear)) { $0.hasStartedAnalysis = true }
         await store.receive(\.inner.analysisFailed) {
-            $0.phase = .failed(message: OnboardingPreloadFeature.failureMessage)
+            $0.phase = .failed(.retry(message: OnboardingPreloadFeature.failureMessage))
         }
     }
 
@@ -136,7 +136,7 @@ struct OnboardingPreloadFeatureTests {
 
         await store.send(.view(.onAppear)) { $0.hasStartedAnalysis = true }
         await store.receive(\.inner.analysisFailed) {
-            $0.phase = .failed(message: OnboardingPreloadFeature.configMissingMessage)
+            $0.phase = .failed(.retry(message: OnboardingPreloadFeature.configMissingMessage))
         }
     }
 
@@ -246,19 +246,47 @@ struct OnboardingPreloadFeatureTests {
         await store.receive(\.inner.jdValidationExpired) { $0.didRetryJDValidation = true }
         // 재검증 valid=false → 재시도하지 않고 실패.
         await store.receive(\.inner.analysisFailed) {
-            $0.phase = .failed(message: OnboardingPreloadFeature.failureMessage)
+            $0.phase = .failed(.retry(message: OnboardingPreloadFeature.failureMessage))
         }
         #expect(createCalls.value == 1)   // 재시도 안 함
     }
 
-    @Test("분석 중 닫기 탭은 delegate 로 코디네이터에 위임한다")
-    func closeDelegatesToCoordinator() async {
+    @Test("일반 실패 모달의 [확인] 은 집중 프로젝트 복귀(retryRequested)를 올린다")
+    func failureConfirmRequestsRetry() async {
+        var state = OnboardingPreloadFeature.State(data: fullData())
+        state.phase = .failed(.retry(message: OnboardingPreloadFeature.failureMessage))
+        let store = TestStore(initialState: state) {
+            OnboardingPreloadFeature()
+        }
+
+        await store.send(.view(.userTappedFailureConfirm))
+        await store.receive(\.delegate.retryRequested)
+    }
+
+    @Test("이용권 소진(403)은 소진 모달이 되고 [확인] 은 위저드 이탈을 올린다")
+    func noRemainingTicketClosesWizard() async {
+        let store = TestStore(initialState: OnboardingPreloadFeature.State(data: fullData())) {
+            OnboardingPreloadFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.interviewClient.createSession = { _ in throw InterviewError.noRemainingTicket }
+        }
+
+        await store.send(.view(.onAppear)) { $0.hasStartedAnalysis = true }
+        await store.receive(\.inner.analysisFailed) {
+            $0.phase = .failed(.noRemainingTicket)
+        }
+        await store.send(.view(.userTappedFailureConfirm))
+        await store.receive(\.delegate.closeRequested)
+    }
+
+    @Test("실패가 아닐 때 [확인] 은 무시한다")
+    func failureConfirmIgnoredOutsideFailure() async {
         let store = TestStore(initialState: OnboardingPreloadFeature.State(data: fullData())) {
             OnboardingPreloadFeature()
         }
 
-        await store.send(.view(.userTappedClose))
-        await store.receive(\.delegate.closeRequested)
+        await store.send(.view(.userTappedFailureConfirm))
     }
 
     @Test("주입된 OnboardingData 를 상태로 보존한다")

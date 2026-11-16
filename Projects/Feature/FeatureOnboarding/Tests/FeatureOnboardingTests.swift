@@ -148,6 +148,21 @@ struct OnboardingCoordinatorTests {
         await store.finish()
     }
 
+    @Test("프리로드 실패 모달 [확인] 은 집중 프로젝트로 되돌린다 — 연관성 카운트는 그대로")
+    func preloadRetryPopsBackToMainProject() async {
+        var state = initialState()
+        state.path.append(.mainProject(.init(step: 3, totalSteps: total)))
+        state.path.append(.preload(.init(data: state.data)))
+        let store = makeStore(state)
+
+        let preloadId = store.state.path.ids[1]
+        await store.send(.path(.element(id: preloadId, action: .preload(.delegate(.retryRequested))))) {
+            $0.path.pop(from: preloadId)
+        }
+        #expect(store.state.relevanceFailureCount == 0)
+        await store.finish()
+    }
+
     @Test("연관성 실패(4회 미만)는 대표 프로젝트로 되돌리고 경고를 주입한다")
     func relevanceFailurePopsBackToMainProject() async {
         var state = initialState()

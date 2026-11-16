@@ -11,7 +11,7 @@ import SwiftUI
 
 // Figma «Onboarding_preload» https://figma.com/design/JL9YPbqBqmaC9Z0I3SzDZS/?node-id=443-9768
 //         준비 완료 판 https://figma.com/design/JL9YPbqBqmaC9Z0I3SzDZS/?node-id=443-9881
-// 풀스크린 다크(HilitBlack.b800) 프리로드 화면 — 프로그레스 대시·뒤로가기 없음, 좌상단 닫기(X)만 있다.
+// 풀스크린 다크(HilitBlack.b800) 프리로드 화면 — 프로그레스 대시·뒤로가기·닫기(X) 없음. 실패는 모달로 알린다.
 // 화면 아래쪽은 오른쪽으로 기운 그린 사면이 덮고, 그 위 가운데에 타이틀·서브·분석 체크리스트가 얹힌다.
 // 준비가 끝나면 그 사면이 위로 올라와 화면 전체를 덮고(443:9882 전면 그린), 글자는 먼저 사라진 뒤
 // 다 덮인 다음에 완료 문구가 올라온다.
@@ -36,22 +36,20 @@ public struct OnboardingPreloadView: View {
             // 그린 사면이 화면 바닥까지 닿아야 하고, 콘텐츠 중앙도 «프레임 중앙» 기준이다.
             .ignoresSafeArea()
             .hilitNavigationBar(
-                // 사면이 다 덮인 뒤에만 밝은 바닥용(검정 X)으로 바꾼다 — 채우는 중에 미리 바꾸면
-                // 아직 어두운 상단에서 아이콘이 묻는다. 실패 판(다크)은 흰 X 다.
                 surface: store.phase.isFullyGreen ? .light : .dark,
-                // 바가 바닥을 칠하지 않는다 — `.filled` 는 완료 톤에서 흰 판이라 초록이 상태바·네비바
-                // 높이만큼 잘려 보이고, 다크 구간에선 칠하던 색이 화면 배경(b800)과 같아 티가 없다.
                 background: .transparent,
                 allowsSwipeBack: false,   // 제출 중 이탈 = 세션 생성 버림
-                // 준비 중엔 슬롯을 비운다(사용자 결정 2026-08-04) — 기다리는 것 말곤 할 게 없는 화면.
-                // 실패 판만 X 를 살린다: 재시도가 없어(PRD §3.1) 이탈이 유일한 출구다.
-                leading: store.phase.showsCloseButton ? .close : .hidden,
-                onClose: { send(.userTappedClose) }
+                // 슬롯을 비운다(사용자 결정 2026-08-04) — 기다리는 것 말곤 할 게 없는 화면.
+                // 실패도 X 가 아니라 모달 [확인] 이 출구다(HLT-36).
+                leading: .hidden
             )
             // 슬롯을 비우는 것만으론 부족해 바 자체를 감춘다 — 빈 leading 슬롯에도 iOS 26 이 글래스
-            // 캡슐을 그려 좌상단에 흐린 원이 남는다. 모디파이어를 갈아끼우지 않고 **값만** 바꿔
-            // 진행 중 애니메이션·@State 가 끊기지 않게 한다(HilitNavigationBar.Kind 주석과 같은 이유).
-            .toolbar(store.phase.showsCloseButton ? .visible : .hidden, for: .navigationBar)
+            // 캡슐을 그려 좌상단에 흐린 원이 남는다.
+            .toolbar(.hidden, for: .navigationBar)
+            // 실패 모달 — 분석 판(다크·사면)을 그대로 깔고 그 위에 띄운다. 재시도 버튼은 없다(PRD §3.1).
+            .hilitModal(item: store.phase.failure) { failure in
+                failureModal(failure)
+            }
             .animation(.easeInOut(duration: 0.3), value: store.phase)
             .onAppear { send(.onAppear) }
     }
@@ -60,15 +58,14 @@ public struct OnboardingPreloadView: View {
     private var content: some View {
         ZStack {
             switch store.phase {
-            case .analyzing:
+            case .analyzing, .failed:
+                // 실패해도 분석 판을 남긴다 — 모달이 그 위에 뜬다.
                 analyzingContent
             case .filling:
                 // 채우는 중엔 글자가 없다 — 분석 텍스트는 사라지고 완료 문구는 아직 이르다.
                 EmptyView()
             case .completed:
                 completedContent
-            case let .failed(message):
-                failedContent(message: message)
             }
         }
         .padding(.horizontal, .ds(.p20))
@@ -192,14 +189,13 @@ public struct OnboardingPreloadView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 분석 실패 (세션 생성·폴링 실패 — 디자인 미정, 근사)
+    // MARK: - 실패 모달 (세션 생성·폴링 실패 — 시안 미출, DS Modal 로 근사)
 
-    /// 재시도 없음(PRD §3.1) — 좌상단 X 로 이탈해 처음부터 다시 시도한다.
-    private func failedContent(message: String) -> some View {
-        header(
-            title: "면접 준비에 실패했어요",
-            subtitle: message
-        )
+    /// 단일 [확인] — 일반 실패는 집중 프로젝트로, 이용권 소진은 위저드 밖으로 나간다(리듀서가 가른다).
+    private func failureModal(_ failure: OnboardingPreloadFeature.State.Failure) -> some View {
+        Modal("면접 준비에 실패했어요", subText: failure.message) {
+            ButtonLarge("확인", .modal) { send(.userTappedFailureConfirm) }
+        }
     }
 
     // MARK: - 공통
@@ -270,14 +266,10 @@ private extension OnboardingPreloadFeature.State.Phase {
         }
     }
 
-    /// 네비바를 띄우는가 — 실패 판 전용(X 가 유일한 출구). 준비 구간은 바 자체를 감춘다.
-    var showsCloseButton: Bool {
-        switch self {
-        case .failed:
-            return true
-        case .analyzing, .filling, .completed:
-            return false
-        }
+    /// 실패 모달 표출 값 — 실패 판에서만 값이 있다(`.hilitModal(item:)` 입력).
+    var failure: OnboardingPreloadFeature.State.Failure? {
+        guard case let .failed(failure) = self else { return nil }
+        return failure
     }
 }
 
@@ -341,7 +333,7 @@ private let previewData = OnboardingData(
 
 #Preview("분석 실패") {
     var state = OnboardingPreloadFeature.State(data: previewData)
-    state.phase = .failed(message: OnboardingPreloadFeature.failureMessage)
+    state.phase = .failed(.retry(message: OnboardingPreloadFeature.failureMessage))
     state.hasStartedAnalysis = true
     return OnboardingPreloadView(
         store: Store(initialState: state) {

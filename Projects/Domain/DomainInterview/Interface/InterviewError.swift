@@ -21,6 +21,7 @@ public enum InterviewError: Error, Equatable, Sendable {
     /// PORTFOLIO_UPLOAD_FAILED (400) — 포트폴리오 처리 실패. 재업로드 유도.
     case portfolioUploadFailed
     /// JD_NOT_VALIDATED (400) — jdUrl 이 사전 검증(JDClient.validate)을 통과하지 않음.
+    /// JD_CONTENT_NOT_FOUND (400 — 검증 캐시 6시간 만료)도 여기로 모은다 — 둘 다 «재검증 후 재시도» 로 풀린다.
     case jdNotValidated
     /// FREETEXT_NOT_RELEVANT (400) — 집중 프로젝트가 포트폴리오와 연관성 부족(코사인 < 0.6). 재작성 유도.
     case freeTextNotRelevant
@@ -65,7 +66,7 @@ extension InterviewError: DomainAPIError {
         case "PORTFOLIO_NOT_FOUND": self = .portfolioNotFound
         case "PORTFOLIO_PROCESSING": self = .portfolioProcessing
         case "PORTFOLIO_UPLOAD_FAILED": self = .portfolioUploadFailed
-        case "JD_NOT_VALIDATED": self = .jdNotValidated
+        case "JD_NOT_VALIDATED", "JD_CONTENT_NOT_FOUND": self = .jdNotValidated
         case "FREETEXT_NOT_RELEVANT": self = .freeTextNotRelevant
         case "USER_PROFILE_NOT_REGISTERED": self = .userProfileNotRegistered
         case "INTERVIEW_SESSION_NOT_FOUND": self = .sessionNotFound

@@ -119,6 +119,21 @@ final class InterviewClientLiveTests: XCTestCase {
         }
     }
 
+    func test_createSession_JD캐시만료를_jdNotValidated로_매핑한다() async throws {
+        let client = makeClient { _ in
+            throw NetworkError.statusCode(400, Data(
+                #"{"success": false, "code": "JD_CONTENT_NOT_FOUND", "message": "JD 링크의 캐시가 만료됐어요. 다시 검증해 주세요."}"#.utf8
+            ))
+        }
+
+        do {
+            _ = try await client.createSession(InterviewConfig(portfolioId: UUID()))
+            XCTFail("에러가 던져져야 한다")
+        } catch {
+            XCTAssertEqual(error as? InterviewError, .jdNotValidated)
+        }
+    }
+
     // MARK: - 준비 폴링
 
     func test_sessionStatus_READY응답의_LocalDateTime과_요약질문을_디코딩한다() async throws {
