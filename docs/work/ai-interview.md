@@ -110,7 +110,7 @@ S1→S3.5는 **도메인 내부** navigation → 규칙대로 자체 `Path` + `S
 |---|---|---|---|
 | S0 직무·연차 | — 가입 온보딩(`FeatureAuth`)으로 이관 | 필수 | ✅ 프로필 등록 → 세션 생성은 서버 스냅샷 |
 | S1 JD | STEP1 JobDescriptionUpload — 링크/직접입력 탭 (상호배타) | 선택 — 스킵 상시 | ✅ 직접입력 200~3,000자 검증 완료 (링크 5회 제한·CONTENT_TOO_SHORT 문구 TODO) |
-| S2 포트폴리오 | STEP2 PortfolioUpload — 202+폴링 | 필수 | ✅ 페이지30·암호 선검증 + 기존 포폴 확인 모달 완료 (폴링 상한·409 복구 TODO) |
+| S2 포트폴리오 | STEP2 PortfolioUpload — 202+폴링 | 필수 | ✅ 페이지30·암호 선검증 + 기존 포폴 확인 모달 + 폴링 상한 완료 (409 복구 TODO) |
 | S3 집중 프로젝트 | STEP3 MainProject — 자유입력 | 선택 — 스킵 상시 | ✅ 상단 문구 PRD 확정본 반영 |
 | S3.5 연관성 + S4 진입 | Preload — **세션 생성 지점** | — | ✅ 세션 생성·폴링·연관성 실패 루프(경고·4회 다이얼로그)·완료 전환 완료 |
 
@@ -130,7 +130,7 @@ S1→S3.5는 **도메인 내부** navigation → 규칙대로 자체 `Path` + `S
   - 연차: 정수 피커 확정(사용자 결정 2026-07-20). `CareerOption { years: Int }` 0~10년(10="10년 이상"). 레벨(주니어/미들/시니어)은 서버가 0-2/3-7/8+ 파생 — 클라 미관여. 휠 라벨: 신입 / N년 이상 / 10년 이상 (최종 시안 3632:14460 표기, 2026-07-31 — 07-20 결정 당시 「N년차」에서 표기만 변경. 값 계약은 그대로 정수).
   - 2회차부터 직무·연차 skip 은 서버 준비 완료 — 반복 연습이 MVP 제외라 클라는 후속.
 - **STEP1 JD** — 링크 검증(계속하기 탭 → `validate`, 성공 시 바로 다음 스텝) ✅ · 성공 시 직접입력 탭 잠금 ✅ · **링크 탭 계속하기는 빈 입력(스킵)/형식 통과 링크만 활성** — 분석 중 비활성 ✅ · **스킵 시 입력 있어도 검증·저장 없이 통과**(jd=nil) ✅ · ① 직접입력 **200~3,000자** 검증(유효 길이만 계속하기 활성, 무효 시 카운터·red 보더·안내 문구, 초과 클램프 안 함) ✅. TODO: ② 링크 본문 <200자 = `CONTENT_TOO_SHORT` 문구 노출 ③ **링크 검증 1일 5회 제한** 초과 에러 노출(서버 에러 코드 확인).
-- **STEP2 포트폴리오** — 클라 선검증은 UX 용 빠른 차단, **최종 판정은 서버 실측**(PRD §7 분담): PDF 타입·20MB ✅ / **페이지 ≤30**(PDFKit `pageCount`) ✅ / **암호 PDF**(`PDFDocument.isEncrypted`) ✅ — `PortfolioFileReader` 가 data+pageCount+isEncrypted 반환, register 전 차단, pageCount 는 서버에 전달. 글자 수 ≥30 은 서버 전용(Tika) → FAILED_FILE 문구만. 폴링 3초 ✅. **1개 제한은 사후 에러가 아니라 사전 확인으로 처리한다** ✅ — 빈 판 진입마다 `PortfolioClient.list` 로 READY 를 찾아 «기존에 있는 포트폴리오로 진행할까요?» 모달을 띄우고 재등록 없이 완료 판으로 앉힌다(자동 교체 금지는 그대로 — 바꾸려면 X → 삭제 확인). TODO: **폴링 상한**(전체 처리 타임아웃 → FAILED_SYSTEM 취급 문구, 초기값 tentative) · `PORTFOLIO_ALREADY_EXISTS`(409) 복구 — 확인 모달이 못 막는 창구가 남아 있다(§[[onboarding#포트폴리오 업로드]]) · 셀룰러 20MB 경고(후속).
+- **STEP2 포트폴리오** — 클라 선검증은 UX 용 빠른 차단, **최종 판정은 서버 실측**(PRD §7 분담): PDF 타입·20MB ✅ / **페이지 ≤30**(PDFKit `pageCount`) ✅ / **암호 PDF**(`PDFDocument.isEncrypted`) ✅ — `PortfolioFileReader` 가 data+pageCount+isEncrypted 반환, register 전 차단, pageCount 는 서버에 전달. 글자 수 ≥30 은 서버 전용(Tika) → FAILED_FILE 문구만. 폴링 3초 ✅. **1개 제한은 사후 에러가 아니라 사전 확인으로 처리한다** ✅ — 빈 판 진입마다 `PortfolioClient.list` 로 READY 를 찾아 «기존에 있는 포트폴리오로 진행할까요?» 모달을 띄우고 재등록 없이 완료 판으로 앉힌다(자동 교체 금지는 그대로 — 바꾸려면 X → 삭제 확인). 폴링 상한 3초 × 40회 ✅(HLT-35). TODO: `PORTFOLIO_ALREADY_EXISTS`(409) 복구 — 확인 모달이 못 막는 창구가 남아 있다(§[[onboarding#포트폴리오 업로드]]) · 셀룰러 20MB 경고(후속).
 - **STEP3 집중 프로젝트(대표 프로젝트)** — 10~300자 · 상한 300 클램프 · 빈 입력 = 스킵(nil) · **하한 10자 클라 선검증** ✅(입력 있고 <10자면 continue 차단+경고, PRD §7 분담 — 연관성 등 최종 판정은 서버) · 상단 고정 문구 교체 확정본("입력하면 그 부분을 집중 검증해요. 건너뛰면 포트폴리오 전체에서 질문해요.") 반영 ✅.
 - **프리로드 = S3.5 + S4** — Phase A ✅ / Phase B 🟠:
   1. ✅ `OnboardingData.interviewConfig()` → `InterviewClient.createSession` + `sessionStatus` 폴링(3초). `.domain(interface: .interview)` 의존 추가 + `tuist generate`. PROCESSING→폴링 / READY→completed / 실패·config 불완전→failed 화면(재시도 없음, PRD §3.1). config 불완전 = `portfolioId` 부재뿐 — 직군·연차는 payload 에서 빠져(서버 프로필 스냅샷) 검사도 제거했다(2026-08-04).
@@ -248,7 +248,7 @@ v3 로 **닫힌** 논의(초안 미결 → 해소): 재시도/멱등성(전면 �
 
 1. ~~**Domain 모델 + SharedDesignSystem**~~ ✅ Job·JD·Portfolio·Interview Interface + DS 토큰 구현
 2. ~~**Domain Clients = Interface 먼저**~~ ✅ Job·JD·Portfolio·Interview (Speech·Permission·Recording·Scoring 은 Part2/3 착수 시). liveValue 는 Implementation stub
-3. ~~**OnboardingFeature (Part 1)**~~ ✅ — STEP1 JD·STEP2 포폴·STEP3 대표 프로젝트 + 프리로드 세션 생성·입력 draft·홈 진입 배선까지. 직군·연차는 가입 온보딩(`FeatureAuth`) 몫. 잔여는 §5 개발 포인트의 TODO 들(폴링 상한·409 복구·문구)
+3. ~~**OnboardingFeature (Part 1)**~~ ✅ — STEP1 JD·STEP2 포폴·STEP3 대표 프로젝트 + 프리로드 세션 생성·입력 draft·홈 진입 배선까지. 직군·연차는 가입 온보딩(`FeatureAuth`) 몫. 잔여는 §5 개발 포인트의 TODO 들(409 복구·문구)
 4. **InterviewSessionFeature** ★ — mock SpeechClient(스크립트 AsyncStream) + `TestClock`로 상태머신 결정론 검증. 디바이스 의존 전에 Example 앱 + 단위테스트로 격리.
    **화면 골격 ✅ (2026-07-25, FeatureInterview 모듈)** — 준비(카메라 확인·가이드)→세션(시계·8분 해금·최종 카운트다운·종료 확인)→실패 화면 상태머신 + 코디네이터, 세션 시계는 TestClock 테스트 고정.
    권한(Permission) 준비 화면 게이트 ✅(2026-07-27) · **PRD v3 화면 정합 ✅(2026-07-27)** — 타이밍 12:00·상태 칩 3종·질문 준비 폴링 게이트·실패 3종·중도 이탈 경고(§6 «PRD v3 정합 현황»).

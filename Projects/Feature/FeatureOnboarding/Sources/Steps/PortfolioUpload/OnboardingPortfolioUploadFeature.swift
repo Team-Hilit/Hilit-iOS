@@ -102,6 +102,8 @@ public struct OnboardingPortfolioUploadFeature {
         /// 조회로 찾은 기존 READY 포트폴리오 — 확인 모달이 떠 있는 동안만 들고 있다.
         /// nil 이 곧 «모달 없음» 이다(별도 표시 플래그를 두면 둘이 어긋난다).
         var existingPortfolio: ExistingPortfolio?
+        /// 이번 업로드의 status 폴링 횟수 — `maxPollAttempts` 에 닿으면 실패로 끊는다(HLT-35). 새 파일마다 0.
+        var pollAttempts = 0
 
         public var isContinueEnabled: Bool { upload.isUploaded }
 
@@ -167,6 +169,8 @@ public struct OnboardingPortfolioUploadFeature {
         /// effect 결과·리듀서 내부 신호. 리듀서만 방출한다.
         @CasePathable
         public enum Inner: Equatable, Sendable {
+            /// 상한으로 끊은 뒤 정리 직전 확인에서 READY 였다 — 실패 판을 완료 판으로 되돌린다.
+            case timedOutUploadBecameReady(fileName: String, portfolioId: UUID)
             /// POST /portfolios 접수 응답 (202 PROCESSING — 드물게 즉시 READY/FAILED).
             case uploadAccepted(PortfolioProcessing)
             /// GET /portfolios/{id}/status 폴링 응답.
@@ -215,6 +219,9 @@ public struct OnboardingPortfolioUploadFeature {
     static let maxPageCount = 30
     /// 처리 상태 폴링 주기 — PortfolioClient 가이드(3~5초)의 하한.
     static let pollInterval: Duration = .seconds(3)
+    /// 폴링 상한 — 3초 × 40회 = 120초(PRD §3.4 · Android `MAX_POLL_ATTEMPTS` 와 같은 값, HLT-35).
+    /// 넘으면 실패 판으로 끊는다 — 판이 `Processing...` 에 영영 멈추지 않게. 마이페이지 폴링 상한은 #145 몫.
+    static let maxPollAttempts = 40
 
     private enum CancelID { case upload }
 
@@ -292,6 +299,7 @@ public struct OnboardingPortfolioUploadFeature {
         case let .fileSelected(url):
             let fileName = url.lastPathComponent
             state.deleteErrorMessage = nil
+            state.pollAttempts = 0
             state.upload = .uploading(fileName: fileName, portfolioId: nil)
             return .run { send in
                 // 클라 선검증 = UX 용 빠른 차단. 최종 판정은 서버 실측 재검증(글자 수·암호 최종 판별은 서버).
@@ -373,6 +381,12 @@ public struct OnboardingPortfolioUploadFeature {
             state.existingPortfolio = existing
             return .none
 
+        case let .timedOutUploadBecameReady(fileName, portfolioId):
+            // 그 사이 사용자가 새 파일을 골랐으면(업로드 중·완료 판) 끼어들지 않는다.
+            guard case .failed = state.upload else { return .none }
+            state.upload = .uploaded(fileName: fileName, portfolioId: portfolioId)
+            return .none
+
         case .portfolioDeleted:
             state.isDeleting = false
             state.deleteErrorMessage = nil
@@ -396,6 +410,13 @@ public struct OnboardingPortfolioUploadFeature {
 
         switch processing.status {
         case .processing:
+            // 상한(HLT-35) — 넘으면 실패 판으로 끊어 판이 멈춘 채 남지 않게 한다. 실패 판은 스와이프백·재선택이
+            // 다시 열리는 판이라 화면 이탈 출구도 같이 돌아온다(X·«이전으로» 는 업로드 중에도 열려 있다).
+            guard state.pollAttempts < Self.maxPollAttempts else {
+                state.upload = .failed(message: Self.genericFailureMessage)
+                return abandonTimedOutUpload(processing.portfolioId, fileName: fileName)
+            }
+            state.pollAttempts += 1
             state.upload = .uploading(fileName: fileName, portfolioId: processing.portfolioId)
             return pollStatus(processing.portfolioId)
 
@@ -436,6 +457,20 @@ public struct OnboardingPortfolioUploadFeature {
             await send(.inner(.uploadFailed(message: Self.failureMessage(for: error))))
         }
         .cancellable(id: CancelID.upload, cancelInFlight: true)
+    }
+
+    /// 상한을 넘긴 PROCESSING 포폴 정리 — 서버에 남겨 두면 다음 업로드가 `PORTFOLIO_UPLOAD_IN_PROGRESS`(409)로 막힌다.
+    /// 지우기 전에 상태를 한 번 더 본다 — 그 사이 READY 가 됐으면 지우지 않고 완료 판으로 받는다(READY 삭제는
+    /// 이번 달 삭제 기회를 써 버린다). PROCESSING 취소는 기회와 무관(서버 스키마). 삭제 결과는 기다리지 않는다 —
+    /// 실패해도 다시 고를 때 서버가 막아 줄 뿐이다. 새 업로드가 접어 버리지 않게 upload 줄기 밖에 둔다.
+    private func abandonTimedOutUpload(_ portfolioId: UUID, fileName: String) -> Effect<Action> {
+        .run { send in
+            if let latest = try? await portfolioClient.status(portfolioId), latest.status == .ready {
+                await send(.inner(.timedOutUploadBecameReady(fileName: fileName, portfolioId: portfolioId)))
+                return
+            }
+            _ = try? await portfolioClient.delete(portfolioId)
+        }
     }
 
     /// 서버에 이미 등록된 파일 제거 — 계정당 1개 제한이라 지워야 재업로드가 가능하다.

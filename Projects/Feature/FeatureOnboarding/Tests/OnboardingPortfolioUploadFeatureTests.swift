@@ -58,6 +58,7 @@ struct OnboardingPortfolioUploadFeatureTests {
             $0.upload = .uploading(fileName: "포트폴리오.pdf", portfolioId: nil)
         }
         await store.receive(\.inner.uploadAccepted) {
+            $0.pollAttempts = 1
             $0.upload = .uploading(fileName: "포트폴리오.pdf", portfolioId: Self.portfolioId)
         }
         await store.receive(\.inner.statusPolled) {
