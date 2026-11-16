@@ -135,6 +135,58 @@ final class PortfolioClientLiveTests: XCTestCase {
         }
     }
 
+    func test_register_교체소진409를_replacementLimitExceeded로_매핑한다() async throws {
+        let client = makeClient { _ in
+            throw NetworkError.statusCode(409, Data(
+                #"{"success": false, "code": "REPLACEMENT_LIMIT_EXCEEDED", "message": "재업로드는 한 달에 한 번만 가능해요."}"#.utf8
+            ))
+        }
+
+        do {
+            _ = try await client.register(PortfolioUpload(fileName: "p.pdf", data: Data()))
+            XCTFail("에러가 던져져야 한다")
+        } catch {
+            XCTAssertEqual(error as? PortfolioError, .replacementLimitExceeded(message: "재업로드는 한 달에 한 번만 가능해요."))
+        }
+    }
+
+    func test_delete_삭제차단409_두종을_각각_매핑한다() async throws {
+        let cases: [(code: String, expected: PortfolioError)] = [
+            ("DELETE_LIMIT_EXCEEDED", .deleteLimitExceeded(message: "m")),
+            ("PORTFOLIO_DELETE_BLOCKED_BY_INTERVIEW", .deleteBlockedByInterview(message: "m"))
+        ]
+        for (code, expected) in cases {
+            let client = makeClient { _ in
+                throw NetworkError.statusCode(409, Data(
+                    #"{"success": false, "code": "\#(code)", "message": "m"}"#.utf8
+                ))
+            }
+            do {
+                _ = try await client.delete(UUID())
+                XCTFail("에러가 던져져야 한다 — \(code)")
+            } catch {
+                XCTAssertEqual(error as? PortfolioError, expected)
+            }
+        }
+    }
+
+    func test_dayText_서버_LocalDateTime을_KST_월일로_표기한다() {
+        // "2027-01-01T00:00:00"(KST) — 서버 nextMonthStart() 모양. 기기 타임존과 무관하게 1월 1일.
+        XCTAssertEqual(PortfolioAvailability.dayText(Date(timeIntervalSince1970: 1_798_729_200)), "1월 1일")
+    }
+
+    func test_availability_빠진_플래그는_막지_않는_쪽으로_읽는다() {
+        let next = Date(timeIntervalSince1970: 1_790_000_000)
+        XCTAssertEqual(
+            PortfolioList(portfolios: []).availability,
+            PortfolioAvailability()
+        )
+        XCTAssertEqual(
+            PortfolioList(portfolios: [], replaceAvailable: false, nextAvailableAt: next, deleteAvailable: false).availability,
+            PortfolioAvailability(replaceAvailable: false, nextReplaceAvailableAt: next, deleteAvailable: false)
+        )
+    }
+
     func test_delete_경로에_UUID를_싣는다() async throws {
         let id = UUID(uuidString: "3E1A8E4B-6C1B-4E1F-9B5A-2F1C0D9E8A70")!
         let client = makeClient { request in

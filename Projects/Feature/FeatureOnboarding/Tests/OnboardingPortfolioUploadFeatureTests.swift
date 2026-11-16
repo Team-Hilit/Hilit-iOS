@@ -281,6 +281,7 @@ struct OnboardingPortfolioUploadFeatureTests {
             OnboardingPortfolioUploadFeature()
         } withDependencies: {
             $0.portfolioClient.delete = { _ in throw PortfolioError.notFound(message: "없는 포트폴리오예요") }
+            $0.portfolioClient.list = { PortfolioList(portfolios: [], deleteAvailable: true) }
         }
 
         await store.send(.view(.userTappedDeleteConfirm)) {
@@ -288,7 +289,12 @@ struct OnboardingPortfolioUploadFeatureTests {
         }
         await store.receive(\.inner.portfolioDeleted) {
             $0.isDeleting = false
+            $0.availability.deleteAvailable = false
             $0.upload = .idle
+        }
+        // READY 삭제 뒤엔 가용성을 서버 값으로 다시 맞춘다 — 404 라 기회를 안 썼으면 서버가 true 로 되돌려 준다.
+        await store.receive(\.inner.availabilityLoaded) {
+            $0.availability.deleteAvailable = true
         }
     }
 
@@ -361,7 +367,9 @@ struct OnboardingPortfolioUploadFeatureTests {
 
         await store.send(.view(.onAppear)) {
             $0.checksExisting = false
+            $0.hasRequestedAvailability = true
         }
+        await store.receive(\.inner.availabilityLoaded)
         await store.receive(\.inner.existingPortfolioFound) {
             $0.existingPortfolio = .init(portfolioId: Self.portfolioId, fileName: "포트폴리오.pdf")
         }
@@ -387,15 +395,28 @@ struct OnboardingPortfolioUploadFeatureTests {
 
         await store.send(.view(.onAppear)) {
             $0.checksExisting = false
+            $0.hasRequestedAvailability = true
         }
+        await store.receive(\.inner.availabilityLoaded)
     }
 
-    @Test("조회가 꺼져 있으면 onAppear 는 아무것도 하지 않는다")
+    @Test("조회가 꺼져 있으면 onAppear 는 기존 포폴 모달 없이 가용성만 한 번 받는다")
     func onAppearSkipsWhenCheckDisabled() async {
         let store = TestStore(initialState: OnboardingPortfolioUploadFeature.State()) {
             OnboardingPortfolioUploadFeature()
+        } withDependencies: {
+            $0.portfolioClient.list = {
+                PortfolioList(portfolios: [Self.readyPortfolio], replaceAvailable: false)
+            }
         }
 
+        await store.send(.view(.onAppear)) {
+            $0.hasRequestedAvailability = true
+        }
+        await store.receive(\.inner.availabilityLoaded) {
+            $0.availability.replaceAvailable = false
+        }
+        // 두 번째 onAppear 는 다시 묻지 않는다.
         await store.send(.view(.onAppear))
     }
 

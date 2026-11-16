@@ -22,6 +22,12 @@ public enum PortfolioError: Error, Equatable, Sendable {
     case invalidPDFFile(message: String)
     /// PORTFOLIO_ALREADY_EXISTS (409) — 계정당 1개 제한. 삭제 후 등록 UX.
     case alreadyExists(message: String)
+    /// PORTFOLIO_DELETE_BLOCKED_BY_INTERVIEW (409) — 이 포폴을 쓰는 면접이 진행 중이라 삭제 불가.
+    case deleteBlockedByInterview(message: String)
+    /// DELETE_LIMIT_EXCEEDED (409) — 이번 달 삭제 기회 소진(READY 포폴 삭제만 센다).
+    case deleteLimitExceeded(message: String)
+    /// REPLACEMENT_LIMIT_EXCEEDED (409) — 이번 달 재업로드(교체) 기회 소진.
+    case replacementLimitExceeded(message: String)
     /// PORTFOLIO_NOT_FOUND (404) — 없거나 본인 소유가 아님.
     case notFound(message: String)
     /// 재로그인 필요 (LOGIN_EXPIRED — 자동 재발급까지 실패한 뒤 도달)
@@ -38,6 +44,9 @@ public enum PortfolioError: Error, Equatable, Sendable {
              let .pageCountExceeded(message),
              let .invalidPDFFile(message),
              let .alreadyExists(message),
+             let .deleteBlockedByInterview(message),
+             let .deleteLimitExceeded(message),
+             let .replacementLimitExceeded(message),
              let .notFound(message):
             return message
         case .sessionExpired, .networkFailure, .serverUnavailable, .unexpected:
@@ -56,6 +65,9 @@ extension PortfolioError: DomainAPIError {
         case "PAGE_COUNT_EXCEEDED": self = .pageCountExceeded(message: message)
         case "INVALID_PDF_FILE": self = .invalidPDFFile(message: message)
         case "PORTFOLIO_ALREADY_EXISTS": self = .alreadyExists(message: message)
+        case "PORTFOLIO_DELETE_BLOCKED_BY_INTERVIEW": self = .deleteBlockedByInterview(message: message)
+        case "DELETE_LIMIT_EXCEEDED": self = .deleteLimitExceeded(message: message)
+        case "REPLACEMENT_LIMIT_EXCEEDED": self = .replacementLimitExceeded(message: message)
         case "PORTFOLIO_NOT_FOUND": self = .notFound(message: message)
         default: return nil
         }

@@ -80,6 +80,60 @@ public struct PortfolioList: Decodable, Equatable, Sendable {
     }
 }
 
+/// 계정 단위 교체·삭제 가용성 — `PortfolioList` 의 네 필드를 한 값으로 묶는다.
+/// 서버 스키마상 `true` = 이번 달 1회 남음, `false` = 0회. 다시 가능한 시각은 막혀 있을 때만 온다.
+/// 모르면(필드 누락·조회 전) 막지 않는다 — 최종 판정은 서버 거절(`*_LIMIT_EXCEEDED`)이 한다.
+public struct PortfolioAvailability: Equatable, Sendable {
+    /// 재업로드(교체) 가능 여부 — 소진이면 업로드가 `REPLACEMENT_LIMIT_EXCEEDED` 로 거절된다.
+    public var replaceAvailable: Bool
+    /// 재업로드가 다시 가능해지는 시각 (가능하면 nil)
+    public var nextReplaceAvailableAt: Date?
+    /// READY 포폴 삭제 가능 여부 — 소진이면 삭제가 `DELETE_LIMIT_EXCEEDED` 로 거절된다(업로드 중 취소는 무관).
+    public var deleteAvailable: Bool
+    /// 삭제가 다시 가능해지는 시각 (가능하면 nil)
+    public var nextDeleteAvailableAt: Date?
+
+    public init(
+        replaceAvailable: Bool = true,
+        nextReplaceAvailableAt: Date? = nil,
+        deleteAvailable: Bool = true,
+        nextDeleteAvailableAt: Date? = nil
+    ) {
+        self.replaceAvailable = replaceAvailable
+        self.nextReplaceAvailableAt = nextReplaceAvailableAt
+        self.deleteAvailable = deleteAvailable
+        self.nextDeleteAvailableAt = nextDeleteAvailableAt
+    }
+}
+
+public extension PortfolioAvailability {
+    /// 다시 가능한 날 표기 «1월 1일». 서버 LocalDateTime 을 디코더가 KST 로 읽으므로(`JSONDecoder.api`)
+    /// 표기도 KST 로 고정한다 — 기기 타임존이면 UTC 서쪽에서 하루 밀린다. 그 가정을 이 한 곳에만 둔다.
+    static func dayText(_ date: Date) -> String {
+        dayFormatter.string(from: date)
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "M월 d일"
+        return formatter
+    }()
+}
+
+public extension PortfolioList {
+    /// 가용성 네 필드 묶음 — 빠진 플래그는 `true`(막지 않음)로 읽는다.
+    var availability: PortfolioAvailability {
+        PortfolioAvailability(
+            replaceAvailable: replaceAvailable ?? true,
+            nextReplaceAvailableAt: nextAvailableAt,
+            deleteAvailable: deleteAvailable ?? true,
+            nextDeleteAvailableAt: nextDeleteAvailableAt
+        )
+    }
+}
+
 /// 업로드 입력 — PDF 20MB 이하 · 30페이지 이하 (서버 검증: `INVALID_FILE_TYPE`·`FILE_TOO_LARGE`·`PAGE_COUNT_EXCEEDED`).
 public struct PortfolioUpload: Equatable, Sendable {
     public var fileName: String

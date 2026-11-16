@@ -29,12 +29,24 @@ public struct OnboardingPortfolioUploadFeature {
         }
     }
 
-    /// 이 화면의 모달 표출 자리 — 둘 중 하나만 뜬다.
+    /// 이 화면의 모달 표출 자리 — 한 번에 하나만 뜬다.
     /// `.hilitModal` 이 cover 표출이라(#63) 한 화면에 두 번 붙이면 둘째가 조용히 무시된다 — 표출 자리를
     /// 하나로 좁히고 무엇을 띄울지는 `State.presentedModal` 이 정한다.
     public enum PresentedModal: Equatable, Sendable {
         case existingPortfolio(ExistingPortfolio)
         case deleteConfirm
+        /// 한 달 1회 규칙 차단 — 삭제 한도·교체 한도. 날짜는 카드가 `State.availability` 에서 읽는다.
+        case quotaBlocked(QuotaBlock)
+    }
+
+    /// 한 달 1회 규칙(HLT-34)에 막힌 동작 — 서버 계정 단위 가용성 두 축 그대로다.
+    public enum QuotaBlock: Equatable, Sendable {
+        /// READY 포폴 삭제 기회 소진 (`deleteAvailable == false` · 서버 `DELETE_LIMIT_EXCEEDED`).
+        case delete
+        /// 삭제 기회는 있지만 교체 기회가 없다 — 지우면 다시 못 올려 필수 스텝에 갇히니 READY 삭제를 막는다.
+        case deleteWithoutReupload
+        /// 재업로드(교체) 기회 소진 (`replaceAvailable == false` · 서버 `REPLACEMENT_LIMIT_EXCEEDED`).
+        case replace
     }
 
     /// 업로드 진행 하위 상태 — 화면 전환 없이 리스트 영역 렌더만 바꾼다.
@@ -102,6 +114,12 @@ public struct OnboardingPortfolioUploadFeature {
         /// 조회로 찾은 기존 READY 포트폴리오 — 확인 모달이 떠 있는 동안만 들고 있다.
         /// nil 이 곧 «모달 없음» 이다(별도 표시 플래그를 두면 둘이 어긋난다).
         var existingPortfolio: ExistingPortfolio?
+        /// 계정 단위 교체·삭제 가용성(서버 목록 값) — 진입 조회·거절 뒤 재조회가 채운다. 모르면 막지 않는다.
+        public var availability = PortfolioAvailability()
+        /// 한 달 1회 규칙 차단 모달 — 삭제·업로드 진입에서 켜고 «확인» 이 끈다.
+        public var quotaBlock: QuotaBlock?
+        /// 가용성 조회를 이미 보냈는지 — `onAppear` 는 여러 번 오므로 화면 수명당 한 번만 묻는다.
+        var hasRequestedAvailability = false
         /// 이번 업로드의 status 폴링 횟수 — `maxPollAttempts` 에 닿으면 실패로 끊는다(HLT-35). 새 파일마다 0.
         var pollAttempts = 0
 
@@ -119,7 +137,14 @@ public struct OnboardingPortfolioUploadFeature {
         public var presentedModal: PresentedModal? {
             if let existingPortfolio { return .existingPortfolio(existingPortfolio) }
             if isDeleteConfirmPresented { return .deleteConfirm }
+            if let quotaBlock { return .quotaBlocked(quotaBlock) }
             return nil
+        }
+
+        /// 기존 포폴을 이번 달엔 바꿀 수 없다 — 지우면(삭제 한도) 또는 지운 뒤 다시 올리면(교체 한도) 막힌다.
+        /// 기존 포폴 확인 모달이 이걸 보고 «그대로 사용» 안내줄을 붙인다.
+        public var isPortfolioChangeLocked: Bool {
+            !availability.deleteAvailable || !availability.replaceAvailable
         }
 
         public init(
@@ -157,6 +182,8 @@ public struct OnboardingPortfolioUploadFeature {
             case userTappedDeleteConfirm
             /// 삭제 확인 모달 «아니요» — 모달만 닫고 파일은 그대로 둔다.
             case userTappedDeleteCancel
+            /// 한 달 1회 차단 모달 «확인» — 모달만 닫는다.
+            case userTappedQuotaBlockDismiss
             /// 기존 포트폴리오 확인 모달 «취소»/«진행할게요» — 그 포폴을 완료 상태로 앉힌다.
             /// 두 버튼이 같은 액션인 건 결과가 하나뿐이기 때문이다(View 주석 참조).
             case userTappedUseExisting
@@ -169,6 +196,10 @@ public struct OnboardingPortfolioUploadFeature {
         /// effect 결과·리듀서 내부 신호. 리듀서만 방출한다.
         @CasePathable
         public enum Inner: Equatable, Sendable {
+            /// 목록 조회의 계정 단위 가용성 — 진입 조회·한도 거절 뒤 재조회가 보낸다.
+            case availabilityLoaded(PortfolioAvailability)
+            /// 서버가 한 달 1회 규칙으로 거절했다(`DELETE_LIMIT_EXCEEDED`·`REPLACEMENT_LIMIT_EXCEEDED`) — 차단 모달.
+            case quotaRejected(QuotaBlock)
             /// 상한으로 끊은 뒤 정리 직전 확인에서 READY 였다 — 실패 판을 완료 판으로 되돌린다.
             case timedOutUploadBecameReady(fileName: String, portfolioId: UUID)
             /// POST /portfolios 접수 응답 (202 PROCESSING — 드물게 즉시 READY/FAILED).
@@ -255,13 +286,21 @@ public struct OnboardingPortfolioUploadFeature {
         // 빈 판 진입마다 켜지고(서버 READY 는 위저드 밖에서 바뀐다), 이미 첨부된 판(복원 포함)에는
         // 끼어들지 않는다. 조회는 진입당 1회 — 이 자리에서 플래그를 끈다.
         case .onAppear:
-            guard state.checksExisting, case .idle = state.upload else { return .none }
+            // 가용성은 진입 판과 무관하게 한 번은 받는다 — draft 로 복원된 완료 판도 X 게이트가 서버 값을 봐야 한다
+            // (교체 소진 계정이 READY 를 지우면 서버는 막지 않고, 다시 못 올려 필수 스텝에 갇힌다).
+            guard state.checksExisting, case .idle = state.upload else {
+                guard !state.hasRequestedAvailability else { return .none }
+                state.hasRequestedAvailability = true
+                return refreshAvailability()
+            }
             state.checksExisting = false
+            state.hasRequestedAvailability = true
             return .run { send in
-                // 실패·부재는 조용히 넘긴다 — 못 찾으면 그냥 평소의 빈 판이라 알릴 게 없다.
-                guard let existing = try? await portfolioClient.list().portfolios
-                    .first(where: { $0.status == .ready })
-                else { return }
+                // 실패·부재는 조용히 넘긴다 — 못 찾으면 그냥 평소의 빈 판이라 알릴 게 없다(가용성도 «모름» = 막지 않음).
+                guard let list = try? await portfolioClient.list() else { return }
+                // 가용성 먼저 — 기존 포폴 모달이 뜰 때 이미 «바꿀 수 없음» 여부를 알고 있어야 한다.
+                await send(.inner(.availabilityLoaded(list.availability)))
+                guard let existing = list.portfolios.first(where: { $0.status == .ready }) else { return }
                 await send(.inner(.existingPortfolioFound(ExistingPortfolio(
                     portfolioId: existing.portfolioId,
                     fileName: existing.fileName ?? Self.unnamedPortfolioFileName
@@ -290,6 +329,12 @@ public struct OnboardingPortfolioUploadFeature {
             // 교체는 파일 행의 X 로 제거한 뒤 다시 업로드하는 UX.
             switch state.upload {
             case .idle, .failed:
+                // 이번 달 교체 기회를 썼으면 피커를 열지 않고 차단 모달(HLT-34 · 마이페이지 HLT-113 과 같은 규칙).
+                // 가용성은 계정 단위라 빈 판이어도 막힌다 — 판이 비어 있는 건 이번 달 이미 바꿨다는 뜻일 수 있다.
+                guard state.availability.replaceAvailable else {
+                    state.quotaBlock = .replace
+                    return .none
+                }
                 state.isFileImporterPresented = true
                 return .none
             case .uploading, .uploaded:
@@ -301,43 +346,112 @@ public struct OnboardingPortfolioUploadFeature {
             state.deleteErrorMessage = nil
             state.pollAttempts = 0
             state.upload = .uploading(fileName: fileName, portfolioId: nil)
-            return .run { send in
-                // 클라 선검증 = UX 용 빠른 차단. 최종 판정은 서버 실측 재검증(글자 수·암호 최종 판별은 서버).
-                let file = try await fileReader.read(url)
-                guard file.data.count <= Self.maxFileSizeBytes else {
-                    await send(.inner(.uploadFailed(message: Self.oversizedFileMessage)))
-                    return
-                }
-                guard !file.isEncrypted else {
-                    await send(.inner(.uploadFailed(message: Self.encryptedFileMessage)))
-                    return
-                }
-                if let pageCount = file.pageCount, pageCount > Self.maxPageCount {
-                    await send(.inner(.uploadFailed(message: Self.pageExceededMessage)))
-                    return
-                }
-                let upload = PortfolioUpload(
-                    fileName: fileName,
-                    fileSize: file.data.count,
-                    pageCount: file.pageCount,
-                    data: file.data
-                )
-                await send(.inner(.uploadAccepted(try await portfolioClient.register(upload))))
-            } catch: { error, send in
-                await send(.inner(.uploadFailed(message: Self.failureMessage(for: error))))
-            }
-            .cancellable(id: CancelID.upload, cancelInFlight: true)
+            return register(url: url, fileName: fileName)
 
         case .fileSelectionFailed:
             state.upload = .failed(message: Self.genericFailureMessage)
             return .none
 
+        // 파일 행 X·삭제 확인·한 달 1회 차단 모달 — 삭제 동선 한 덩어리라 한 함수에서 읽는다.
+        case .userTappedRemoveFile, .userTappedDeleteConfirm, .userTappedDeleteCancel, .userTappedQuotaBlockDismiss:
+            return reduceRemoval(&state, action)
+        }
+    }
+
+    private func reduceInner(_ state: inout State, _ action: Action.Inner) -> Effect<Action> {
+        switch action {
+        case .uploadAccepted(let processing), .statusPolled(let processing):
+            return applyProcessing(&state, processing)
+
+        case let .uploadFailed(message):
+            state.upload = .failed(message: message)
+            return .none
+
+        case let .existingPortfolioFound(existing):
+            state.existingPortfolio = existing
+            return .none
+
+        case let .timedOutUploadBecameReady(fileName, portfolioId):
+            // 그 사이 사용자가 새 파일을 골랐으면(업로드 중·완료 판) 끼어들지 않는다.
+            guard case .failed = state.upload else { return .none }
+            state.upload = .uploaded(fileName: fileName, portfolioId: portfolioId)
+            return .none
+
+        case let .availabilityLoaded(availability):
+            state.availability = availability
+            return .none
+
+        case let .quotaRejected(block):
+            // 목록 값이 낡았던 것 — 거절 사실을 바로 반영하고 다시 가능한 날짜는 재조회로 채운다.
+            state.isDeleting = false
+            switch block {
+            case .delete:
+                state.availability.deleteAvailable = false
+                state.quotaBlock = block
+                // 업로드 중 «네» 가 폴링을 끊었는데 그 사이 READY 가 돼 삭제가 거절된 경우 — 폴링을 다시 잇는다
+                // (안 이으면 `Processing...` 에 멈춘다 — `portfolioDeleteFailed` 와 같은 처리).
+                if case let .uploading(_, portfolioId?) = state.upload {
+                    return .merge(refreshAvailability(), pollStatus(portfolioId))
+                }
+                return refreshAvailability()
+            case .deleteWithoutReupload:
+                break
+            case .replace:
+                state.availability.replaceAvailable = false
+                // 등록 거절 — 첨부 없는 빈 판으로 되돌린다(실패 판 문구 대신 모달이 사유를 말한다).
+                if state.upload.isUploading { state.upload = .idle }
+            }
+            state.quotaBlock = block
+            return refreshAvailability()
+
+        case .portfolioDeleted:
+            state.isDeleting = false
+            state.deleteErrorMessage = nil
+            // READY 삭제는 이번 달 삭제 기회를 쓴다(서버 스키마) — 같은 화면에서 또 지우려 하면 미리 막고,
+            // 다시 가능한 날짜는 재조회로 채운다(업로드 중 취소는 기회와 무관이라 그대로).
+            guard state.upload.isUploaded else {
+                state.upload = .idle
+                return .none
+            }
+            state.availability.deleteAvailable = false
+            state.upload = .idle
+            return refreshAvailability()
+
+        case let .portfolioDeleteFailed(message):
+            state.isDeleting = false
+            state.deleteErrorMessage = message
+            // 업로드 중이던 건이면 «네» 에서 폴링을 이미 끊었다 — 서버 파일이 남았으니 폴링을 다시 잇는다
+            // (안 이으면 판이 Processing... 에 멈춘 채 READY 로 못 넘어간다).
+            guard case let .uploading(_, portfolioId) = state.upload, let portfolioId else { return .none }
+            return pollStatus(portfolioId)
+        }
+    }
+}
+
+// MARK: - 효과·헬퍼 (타입 본문 길이 한도 — 리듀서 본문 밖으로 뺀다)
+
+extension OnboardingPortfolioUploadFeature {
+    /// 삭제 동선 — 파일 행 X → (한 달 1회 게이트) → 확인 모달 → delete. 나머지 View 액션은 reduceView 몫.
+    private func reduceRemoval(_ state: inout State, _ action: Action.View) -> Effect<Action> {
+        switch action {
         case .userTappedRemoveFile:
             // 첨부된 파일이 있을 때만 확인 모달 — 삭제는 «네» 를 받고서 한다.
             guard !state.isDeleting else { return .none }
             switch state.upload {
-            case .uploading, .uploaded:
+            case .uploading:
+                // 업로드 중 취소는 한 달 1회 기회를 쓰지 않는다(서버 스키마) — 게이트 없이 확인만.
                 state.isDeleteConfirmPresented = true
+                return .none
+            case .uploaded:
+                // READY 삭제는 한 달 1회 규칙에 걸린다(HLT-34). 지울 수는 있어도 다시 못 올리면 위저드가
+                // 필수 스텝에서 막히므로 교체 한도도 같이 본다 — 둘 중 하나라도 소진이면 그 사유로 막는다.
+                if !state.availability.deleteAvailable {
+                    state.quotaBlock = .delete
+                } else if !state.availability.replaceAvailable {
+                    state.quotaBlock = .deleteWithoutReupload
+                } else {
+                    state.isDeleteConfirmPresented = true
+                }
                 return .none
             case .idle, .failed:
                 return .none
@@ -365,42 +479,49 @@ public struct OnboardingPortfolioUploadFeature {
         case .userTappedDeleteCancel:
             state.isDeleteConfirmPresented = false
             return .none
+
+        case .userTappedQuotaBlockDismiss:
+            state.quotaBlock = nil
+            return .none
+
+        case .binding, .fileSelected, .fileSelectionFailed, .onAppear, .userTappedBack, .userTappedClose,
+             .userTappedContinue, .userTappedUploadCard, .userTappedUseExisting:
+            return .none
         }
     }
 
-    private func reduceInner(_ state: inout State, _ action: Action.Inner) -> Effect<Action> {
-        switch action {
-        case .uploadAccepted(let processing), .statusPolled(let processing):
-            return applyProcessing(&state, processing)
-
-        case let .uploadFailed(message):
-            state.upload = .failed(message: message)
-            return .none
-
-        case let .existingPortfolioFound(existing):
-            state.existingPortfolio = existing
-            return .none
-
-        case let .timedOutUploadBecameReady(fileName, portfolioId):
-            // 그 사이 사용자가 새 파일을 골랐으면(업로드 중·완료 판) 끼어들지 않는다.
-            guard case .failed = state.upload else { return .none }
-            state.upload = .uploaded(fileName: fileName, portfolioId: portfolioId)
-            return .none
-
-        case .portfolioDeleted:
-            state.isDeleting = false
-            state.deleteErrorMessage = nil
-            state.upload = .idle
-            return .none
-
-        case let .portfolioDeleteFailed(message):
-            state.isDeleting = false
-            state.deleteErrorMessage = message
-            // 업로드 중이던 건이면 «네» 에서 폴링을 이미 끊었다 — 서버 파일이 남았으니 폴링을 다시 잇는다
-            // (안 이으면 판이 Processing... 에 멈춘 채 READY 로 못 넘어간다).
-            guard case let .uploading(_, portfolioId) = state.upload, let portfolioId else { return .none }
-            return pollStatus(portfolioId)
+    /// 고른 PDF 등록 — 클라 선검증 → register. 교체 한도 거절(HLT-34)은 실패 판 대신 차단 모달로 보낸다.
+    private func register(url: URL, fileName: String) -> Effect<Action> {
+        .run { send in
+            // 클라 선검증 = UX 용 빠른 차단. 최종 판정은 서버 실측 재검증(글자 수·암호 최종 판별은 서버).
+            let file = try await fileReader.read(url)
+            guard file.data.count <= Self.maxFileSizeBytes else {
+                await send(.inner(.uploadFailed(message: Self.oversizedFileMessage)))
+                return
+            }
+            guard !file.isEncrypted else {
+                await send(.inner(.uploadFailed(message: Self.encryptedFileMessage)))
+                return
+            }
+            if let pageCount = file.pageCount, pageCount > Self.maxPageCount {
+                await send(.inner(.uploadFailed(message: Self.pageExceededMessage)))
+                return
+            }
+            let upload = PortfolioUpload(
+                fileName: fileName,
+                fileSize: file.data.count,
+                pageCount: file.pageCount,
+                data: file.data
+            )
+            await send(.inner(.uploadAccepted(try await portfolioClient.register(upload))))
+        } catch: { error, send in
+            if case .replacementLimitExceeded? = error as? PortfolioError {
+                await send(.inner(.quotaRejected(.replace)))
+            } else {
+                await send(.inner(.uploadFailed(message: Self.failureMessage(for: error))))
+            }
         }
+        .cancellable(id: CancelID.upload, cancelInFlight: true)
     }
 
     /// 등록·폴링 공통 응답 반영 — PROCESSING 이면 폴링을 잇고, READY/FAILED 면 하위 상태를 확정한다.
@@ -473,6 +594,14 @@ public struct OnboardingPortfolioUploadFeature {
         }
     }
 
+    /// 계정 가용성 재조회 — 한도 거절 뒤 다시 가능한 날짜를 서버 값으로 채운다. 실패는 날짜 없는 문구로 남긴다.
+    private func refreshAvailability() -> Effect<Action> {
+        .run { send in
+            guard let list = try? await portfolioClient.list() else { return }
+            await send(.inner(.availabilityLoaded(list.availability)))
+        }
+    }
+
     /// 서버에 이미 등록된 파일 제거 — 계정당 1개 제한이라 지워야 재업로드가 가능하다.
     /// **낙관 갱신 금지** — 응답을 보고서야 판을 비운다(마이페이지 삭제와 같은 규칙).
     /// 먼저 비우면 실패해도 사용자 눈엔 지워진 걸로 보이고, 서버엔 남아 다음 업로드가 409 로 막힌다.
@@ -484,6 +613,9 @@ public struct OnboardingPortfolioUploadFeature {
             // 404 = 서버에 이미 없다 — 지운 것과 결과가 같으니 성공으로 닫는다.
             if case .notFound? = error as? PortfolioError {
                 await send(.inner(.portfolioDeleted))
+            } else if case .deleteLimitExceeded? = error as? PortfolioError {
+                // 목록 값을 못 받았거나 낡았을 때(draft 복원 판 등) 서버가 마지막으로 막는다 — 배너 대신 차단 모달.
+                await send(.inner(.quotaRejected(.delete)))
             } else {
                 await send(.inner(.portfolioDeleteFailed(
                     message: (error as? PortfolioError)?.userMessage ?? Self.deleteFailureMessage

@@ -6,6 +6,8 @@
 //
 
 import ComposableArchitecture
+import DomainPortfolioInterface
+import Foundation
 import SharedDesignSystemInterface
 import SwiftUI
 import UniformTypeIdentifiers
@@ -54,7 +56,7 @@ public struct OnboardingPortfolioUploadView: View {
                 send(.fileSelectionFailed)
             }
         }
-        // 모달 2개 — `.hilitModal` 은 cover 표출이라 두 번 붙이면 둘째가 조용히 무시된다.
+        // 모달 3종 — `.hilitModal` 은 cover 표출이라 두 번 붙이면 둘째가 조용히 무시된다.
         // 표출 자리를 하나로 두고 무엇을 띄울지는 `store.presentedModal` 이 정한다.
         .hilitModal(item: store.presentedModal) { modal in
             switch modal {
@@ -62,6 +64,8 @@ public struct OnboardingPortfolioUploadView: View {
                 existingPortfolioModal
             case .deleteConfirm:
                 deleteConfirmModal
+            case let .quotaBlocked(block):
+                quotaBlockedModal(block)
             }
         }
         .onAppear { send(.onAppear) }
@@ -73,8 +77,14 @@ public struct OnboardingPortfolioUploadView: View {
     /// **두 버튼이 같은 액션인 건 결과가 하나뿐이라서다** — 포폴은 계정당 1개고 교체는 한 달 1회라
     /// «취소» 도 갈 곳이 없다(서버에 READY 가 있으면 그걸 불러오는 것 말고 할 게 없다).
     /// 둘 다 모달을 닫고 기존 포폴을 완료 판에 앉힌다. 바꾸려면 완료 판의 X → 삭제 확인 모달이 그 자리다.
+    ///
+    /// 이번 달 바꿀 수 없는 계정이면(HLT-34 — 삭제·교체 한도 중 하나라도 소진) 안내줄로 «그대로 쓴다» 를 미리 알린다.
     private var existingPortfolioModal: some View {
-        Modal("기존에 있는 포트폴리오로\n진행할까요?", icon: Image.Img.book) {
+        Modal(
+            "기존에 있는 포트폴리오로\n진행할까요?",
+            icon: Image.Img.book,
+            info: store.isPortfolioChangeLocked ? "이번 달은 포트폴리오를 바꿀 수 없어 그대로 사용해요" : nil
+        ) {
             ButtonLarge(.modal, tone: .twoColor) {
                 Button("취소") { send(.userTappedUseExisting) }
             } trailing: {
@@ -87,18 +97,52 @@ public struct OnboardingPortfolioUploadView: View {
 
     /// 파일 행 X → 삭제 확인. 마이페이지 «모달을 모아봤어요»(435:8892)와 같은 계열이고
     /// 카피·버튼 라벨(«아니요 / 네»)만 온보딩 판이다. delete API 는 «네» 에서만 나간다.
-    /// TODO: 남은 횟수는 서버가 안 준다(목록 응답은 deleteAvailable·nextDeleteAvailableAt 만) — 1 고정 문구.
+    /// 남은 횟수는 서버 `deleteAvailable` 에서 나온다(스키마: true = 1회, false = 0회) — 하드코딩 제거(HLT-34).
+    /// 업로드 중 취소는 기회를 쓰지 않아(서버 스키마) 횟수 줄을 붙이지 않는다.
     private var deleteConfirmModal: some View {
         Modal(
             "포트폴리오를 삭제하시겠어요?",
             subText: "포트폴리오 삭제 기회는 한 달에 한 번이에요.",
-            info: "이번 달 남은 삭제 기회 1번"
+            info: store.upload.isUploaded
+                ? "이번 달 남은 삭제 기회 \(store.availability.deleteAvailable ? 1 : 0)번"
+                : nil
         ) {
             ButtonLarge(.modal, tone: .twoColor) {
                 Button("아니요") { send(.userTappedDeleteCancel) }
             } trailing: {
                 Button("네") { send(.userTappedDeleteConfirm) }
             }
+        }
+    }
+
+    // MARK: - 한 달 1회 차단 모달
+
+    /// 삭제·교체 한도 소진 — 시안 없음, 마이페이지 차단 모달(435:8895)과 같은 틀·카피 계열(임시).
+    /// 날짜는 서버 `nextDeleteAvailableAt`·`nextAvailableAt` 이고, 없으면 날짜 없이 횟수만 알린다(지어내지 않는다).
+    private func quotaBlockedModal(_ block: OnboardingPortfolioUploadFeature.QuotaBlock) -> some View {
+        let availability = store.availability
+        let title: String
+        let subText: String
+        let info: String
+        switch block {
+        case .delete:
+            title = "포트폴리오를 삭제할 수 없어요"
+            subText = "포트폴리오 삭제는 한 달에 한 번만 할 수 있어요."
+            info = availability.nextDeleteAvailableAt
+                .map { "\(PortfolioAvailability.dayText($0))부터 다시 삭제할 수 있어요" } ?? "이번 달 남은 삭제 기회 0번"
+        case .deleteWithoutReupload:
+            title = "포트폴리오를 삭제할 수 없어요"
+            subText = "지우면 이번 달엔 다시 올릴 수 없어서 삭제를 막았어요."
+            info = availability.nextReplaceAvailableAt
+                .map { "다음 가능일: \(PortfolioAvailability.dayText($0))" } ?? "이번 달 남은 기회 0번"
+        case .replace:
+            title = "포트폴리오를\n새로 업로드할 수 없어요."
+            subText = "이번 달은 더 이상 교체할 수 없어요."
+            info = availability.nextReplaceAvailableAt
+                .map { "다음 가능일: \(PortfolioAvailability.dayText($0))" } ?? "이번 달 남은 기회 0번"
+        }
+        return Modal(title, subText: subText, info: info, infoStyle: .error) {
+            ButtonLarge("확인", .modal) { send(.userTappedQuotaBlockDismiss) }
         }
     }
 
@@ -281,6 +325,24 @@ private let previewFileName = "홍길동 자기소개서_SK프롭티어 기업 �
                     )
                 )
                 state.isDeleteConfirmPresented = true
+                return state
+            }()
+        ) {
+            OnboardingPortfolioUploadFeature()
+        }
+    )
+}
+
+#Preview("한 달 1회 차단 — 교체 소진") {
+    OnboardingPortfolioUploadView(
+        store: Store(
+            initialState: {
+                var state = OnboardingPortfolioUploadFeature.State()
+                state.availability = .init(
+                    replaceAvailable: false,
+                    nextReplaceAvailableAt: Date(timeIntervalSince1970: 1_798_729_200)
+                )
+                state.quotaBlock = .replace
                 return state
             }()
         ) {
