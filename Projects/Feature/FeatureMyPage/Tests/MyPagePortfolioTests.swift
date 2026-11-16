@@ -34,14 +34,14 @@ struct MyPagePortfolioTests {
         TestStore(initialState: state) { MyPageFeature() }
     }
 
-    @Test("면접 중이 아니면 삭제 탭이 확인 모달을 띄우고 재업로드 가능 여부를 담는다")
+    @Test("면접 중이 아니면 삭제 탭이 확인 모달을 띄운다")
     func deleteTapPresentsConfirmWithReuploadNotice() async {
         var state = MyPageFeature.State(portfolio: .registered(.init(name: "p.pdf")))
-        state.replaceAvailable = false
+        state.availability.replaceAvailable = false
         let store = makeStore(state)
 
         await store.send(.view(.userTappedRemovePortfolio)) {
-            $0.presentedModal = .deleteConfirm(canReupload: false)
+            $0.presentedModal = .deleteConfirm
         }
     }
 
@@ -52,20 +52,43 @@ struct MyPagePortfolioTests {
         let store = makeStore(state)
 
         await store.send(.view(.userTappedRemovePortfolio)) {
-            $0.presentedModal = .deleteBlocked(canReupload: true)
+            $0.presentedModal = .deleteBlocked(.interviewInProgress)
         }
     }
 
     @Test("등록 상태에서 업로드 탭 — 교체 가능하면 확인, 소진이면 차단 모달")
     func uploadTapBranchesOnReplaceAvailability() async {
         var state = MyPageFeature.State(portfolio: .registered(.init(name: "p.pdf")))
-        state.replaceAvailable = false
+        state.availability.replaceAvailable = false
         let store = makeStore(state)
 
         await store.send(.view(.userTappedUploadPortfolio)) {
-            $0.presentedModal = .replaceBlocked(remaining: 0)
+            $0.presentedModal = .replaceBlocked
         }
     }
+
+    @Test("목록 응답의 다음 가능일·삭제 가능 여부를 그대로 상태에 담는다 (HLT-106)")
+    func entryLoadedStoresServerAvailability() async {
+        let list = PortfolioList(
+            portfolios: [],
+            replaceAvailable: false,
+            nextAvailableAt: Self.nextMonth,
+            deleteAvailable: false,
+            nextDeleteAvailableAt: Self.nextMonth
+        )
+        let store = makeStore(MyPageFeature.State())
+
+        await store.send(.inner(.entryLoaded(Self.profile, list, []))) {
+            $0.profile = .init(profile: Self.profile)
+            $0.availability = .init(
+                replaceAvailable: false,
+                nextReplaceAvailableAt: Self.nextMonth,
+                deleteAvailable: false,
+                nextDeleteAvailableAt: Self.nextMonth
+            )
+        }
+    }
+
 
     @Test("삭제 확인 — 서버 삭제 후 진입 조회 전체를 다시 탄다")
     func deleteConfirmDeletesAndRefetches() async {
@@ -73,7 +96,7 @@ struct MyPagePortfolioTests {
         var state = MyPageFeature.State(
             portfolio: .registered(.init(id: Self.portfolioId, name: "portfolio.pdf"))
         )
-        state.presentedModal = .deleteConfirm(canReupload: true)
+        state.presentedModal = .deleteConfirm
         let store = TestStore(initialState: state) {
             MyPageFeature()
         } withDependencies: {
@@ -94,7 +117,6 @@ struct MyPagePortfolioTests {
         await store.receive(\.inner.entryLoaded) {
             $0.profile = .init(profile: Self.profile)
             $0.portfolio = .empty
-            $0.replaceAvailable = true
             $0.isInterviewInProgress = false
             $0.reports = []
         }
@@ -107,7 +129,7 @@ struct MyPagePortfolioTests {
         var state = MyPageFeature.State(
             portfolio: .registered(.init(id: Self.portfolioId, name: "portfolio.pdf"))
         )
-        state.presentedModal = .deleteConfirm(canReupload: true)
+        state.presentedModal = .deleteConfirm
         let store = TestStore(initialState: state) {
             MyPageFeature()
         } withDependencies: {
@@ -121,4 +143,7 @@ struct MyPagePortfolioTests {
             $0.alert = .plain(message: "잠시 후 다시 시도해 주세요.")
         }
     }
+
+    /// 2027-01-01 00:00 KST — 서버 `nextMonthStart()` 모양의 값.
+    private static let nextMonth = Date(timeIntervalSince1970: 1_798_729_200)
 }

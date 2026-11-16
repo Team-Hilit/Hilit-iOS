@@ -10,6 +10,8 @@
 // 나머지 탭은 파일 하단 private 픽스처로 State 를 직접 세운다.
 
 import ComposableArchitecture
+import DomainPortfolioInterface
+import Foundation
 import SharedDesignSystemInterface
 import SwiftUI
 
@@ -60,25 +62,26 @@ import SwiftUI
 
 #Preview("모달 — 포트폴리오 삭제") {
     var state = MyPageFeature.State.filled
-    state.presentedModal = .deleteConfirm(canReupload: true)
+    state.presentedModal = .deleteConfirm
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 
 #Preview("모달 — 삭제 불가") {
     var state = MyPageFeature.State.filled
-    state.presentedModal = .deleteBlocked(canReupload: nil)
+    state.presentedModal = .deleteBlocked(.interviewInProgress)
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 
 #Preview("모달 — 새로 업로드") {
     var state = MyPageFeature.State.filled
-    state.presentedModal = .replaceConfirm(remaining: 1)
+    state.presentedModal = .replaceConfirm
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 
 #Preview("모달 — 업로드 불가") {
     var state = MyPageFeature.State.filled
-    state.presentedModal = .replaceBlocked(remaining: 0)
+    state.availability = .init(replaceAvailable: false, nextReplaceAvailableAt: Date(timeIntervalSince1970: 1_798_729_200))
+    state.presentedModal = .replaceBlocked
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 

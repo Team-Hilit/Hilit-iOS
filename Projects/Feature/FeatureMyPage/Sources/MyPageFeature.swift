@@ -142,19 +142,26 @@ public struct MyPageFeature {
     }
 
     /// 이 화면이 띄우는 모달 — 동시 표출을 타입으로 막는다(`.hilitModal(item:)` 규칙).
-    /// Figma «모달을 모아봤어요» 6개 인스턴스가 5케이스로 접힌다 — 삭제 불가 두 판은
-    /// 안내줄 유무만 다르므로 `canReupload` 의 nil 로 표현한다.
+    /// Figma «모달을 모아봤어요» 6개 인스턴스.
+    /// 재업로드·삭제 가능 여부와 다시 가능한 날짜는 케이스에 싣지 않는다 — 카드가 `State.availability`
+    /// 를 그대로 읽는다(서버 값 단일 소스, 모달이 떠 있는 동안 재조회가 와도 같은 값을 본다).
     public enum Modal: Equatable, Sendable {
         /// 포트폴리오를 삭제하시겠어요? (435:8892) — 안내줄은 «삭제 후 이번 달 재업로드 가능 여부» 고지(PRD 3.2-⑤).
-        case deleteConfirm(canReupload: Bool)
-        /// 포트폴리오를 삭제할 수 없어요 — 면접 진행 중 (435:8893 안내줄 없음 / 435:8894 있음, nil 로 접는다)
-        case deleteBlocked(canReupload: Bool?)
+        case deleteConfirm
+        /// 포트폴리오를 삭제할 수 없어요 (435:8893·435:8894) — 사유별로 문구가 갈린다.
+        case deleteBlocked(DeleteBlockReason)
         /// 포트폴리오를 새로 업로드하시겠어요? (435:8896)
-        case replaceConfirm(remaining: Int)
-        /// 포트폴리오를 새로 업로드할 수 없어요 — 이번 달 기회 소진 (435:8895)
-        case replaceBlocked(remaining: Int)
+        case replaceConfirm
+        /// 포트폴리오를 새로 업로드할 수 없어요 — 이번 달 교체 기회 소진 (435:8895)
+        case replaceBlocked
         /// 처리 중 (435:8897 modal/loading)
         case loading
+    }
+
+    /// 삭제를 막는 사유 — 지금은 진행 중 면접 하나(PRD).
+    public enum DeleteBlockReason: Equatable, Sendable {
+        /// 이 포폴을 쓰는 면접이 진행 중이다 (목록 `interviewInProgress` · 서버 `PORTFOLIO_DELETE_BLOCKED_BY_INTERVIEW`).
+        case interviewInProgress
     }
 
     // MARK: - State
@@ -164,8 +171,9 @@ public struct MyPageFeature {
         public var profile: Profile
         public var portfolio: Portfolio
         public var reports: IdentifiedArrayOf<Report>
-        /// 이번 달 포폴 교체(재업로드) 가능 여부 — 삭제·교체 모달 안내가 전부 이 값에서 나온다. 모르면 막지 않는다(nil → true).
-        public var replaceAvailable: Bool
+        /// 계정 단위 교체·삭제 가용성과 다시 가능한 날짜(서버 목록 값) — 삭제·교체 게이트와 모달 안내가 전부 이 값에서 나온다.
+        /// 모르면 막지 않는다(빠진 플래그 → true). 최종 판정은 서버 거절이다.
+        public var availability: PortfolioAvailability
         /// 지금 면접이 진행 중인가 — 삭제를 막는 조건(모달 «삭제할 수 없어요»).
         public var isInterviewInProgress: Bool
         /// 펼쳐진 리포트들 — **여러 행을 동시에 펼쳐 둘 수 있다**(홈 위젯②와 같은 규칙).
@@ -188,7 +196,7 @@ public struct MyPageFeature {
             profile: Profile = .init(name: "", jobGroup: "", careerLevel: "", remainingTickets: 0, email: "-"),
             portfolio: Portfolio = .empty,
             reports: IdentifiedArrayOf<Report> = [],
-            replaceAvailable: Bool = true,
+            availability: PortfolioAvailability = .init(),
             isInterviewInProgress: Bool = false,
             expandedReportIDs: Set<Report.ID> = [],
             isPortfolioTooltipPresented: Bool = false,
@@ -197,7 +205,7 @@ public struct MyPageFeature {
             self.profile = profile
             self.portfolio = portfolio
             self.reports = reports
-            self.replaceAvailable = replaceAvailable
+            self.availability = availability
             self.isInterviewInProgress = isInterviewInProgress
             self.expandedReportIDs = expandedReportIDs
             self.isPortfolioTooltipPresented = isPortfolioTooltipPresented

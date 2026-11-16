@@ -86,7 +86,7 @@ struct MyPageUploadTests {
         }
 
         var replacing = MyPageFeature.State(portfolio: .registered(.init(id: UploadFixture.existingID, name: "old.pdf")))
-        replacing.presentedModal = .replaceConfirm(remaining: 1)
+        replacing.presentedModal = .replaceConfirm
         let replace = TestStore(initialState: replacing) { MyPageFeature() }
         await replace.send(.view(.userTappedModalConfirm)) {
             $0.presentedModal = nil
@@ -161,7 +161,7 @@ struct MyPageUploadTests {
             $0.portfolio = .init(list: UploadFixture.readyList)
             // 업로드가 끝난 판이라 접수 id 는 남지 않는다 — 다음 취소가 남의 포폴을 지우지 않게.
             $0.uploadServerID = nil
-            $0.replaceAvailable = false
+            $0.availability.replaceAvailable = false
             $0.isInterviewInProgress = false
             $0.reports = []
         }
@@ -207,7 +207,7 @@ struct MyPageUploadTests {
             $0.profile = .init(profile: UploadFixture.profile)
             $0.portfolio = .init(list: UploadFixture.readyList)
             $0.uploadServerID = nil
-            $0.replaceAvailable = false
+            $0.availability.replaceAvailable = false
             $0.isInterviewInProgress = false
             $0.reports = []
         }
@@ -308,7 +308,7 @@ struct MyPageUploadTests {
             $0.profile = .init(profile: UploadFixture.profile)
             $0.portfolio = .init(list: UploadFixture.readyList)
             $0.uploadServerID = nil
-            $0.replaceAvailable = false
+            $0.availability.replaceAvailable = false
             $0.reports = []
         }
 

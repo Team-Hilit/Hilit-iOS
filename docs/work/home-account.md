@@ -153,7 +153,7 @@ AuthTerms 제출 후 이어지는 4화면. AuthFeature 도메인 내부 내비(�
 | 통과 | 온보딩 위저드 S1~ (직군·연차는 서버 프로필 스냅샷 — 클라 미전송) → 세션 생성 → 면접 | cross-feature — 기존 dev 버튼 경로의 정식화 |
 | held 세션 | [이어서 진행] → 같은 session_id 로 Part 2 복귀 (`InterviewFeature.State(sessionId:)` — [ai-interview](ai-interview.md) 작업 D 와 합류) | cross-feature |
 | `NO_REMAINING` | «무료 횟수를 모두 사용했어요» 안내 (MVP 후 페이월 자리) | 홈 내부 |
-| `PORTFOLIO_NOT_READY` | 포폴 등록(S2) 라우팅 — 교체 소진 시 «다음 달 1일부터 업로드 가능» 병기 | cross-feature (S2 강제 라우팅 — [ai-interview](ai-interview.md) §2 표와 동일 메커니즘) |
+| `PORTFOLIO_NOT_READY` | 포폴 등록(S2) 라우팅 — 교체 소진 시 «(서버 `nextAvailableAt`)부터 업로드 가능» 병기 | cross-feature (S2 강제 라우팅 — [ai-interview](ai-interview.md) §2 표와 동일 메커니즘) |
 | `CONSENT_*` | 동의 플로우 (A3 자리 — §2) | 예약 |
 | `ACCOUNT_SUSPENDED` | `AuthSuspension` 정지 안내 (§2) | cross-feature — AppFeature 제시 |
 | 기타 (`RATE_LIMITED` 등) | 각 안내 | 홈 내부 |
@@ -266,7 +266,7 @@ enum ReportRow { case first; case final(lastUpdatedAt:); case generationFailed }
 |---|---|
 | 잔여 0 + 기록 3건 | 위젯① 소진 안내, 기록 열람은 그대로 — «다 썼어도 기록은 남는다» |
 | 포폴 삭제 + 기록 존재 | 행 펼침에 «삭제된 포트폴리오» 배지, 위젯③ «포트폴리오 등록 필요» |
-| 교체 소진 + 포폴 0 | PORTFOLIO_NOT_READY 안내에 «다음 달 1일부터 업로드 가능» 병기 |
+| 교체 소진 + 포폴 0 | PORTFOLIO_NOT_READY 안내에 «(서버 `nextAvailableAt`)부터 업로드 가능» 병기 |
 | 지인 피드백 도착 직후 홈 복귀 | 해당 행 즉시 «최종» + last updated (홈 재진입 시 재조회로 실현) |
 | 진행 중 세션 채로 홈 재진입 | 위젯① = [이어서 진행], 같은 session_id (표시 후 TTL 만료 레이스 → 미결 #4) |
 | A1 동의 전 앱 종료 | 계정 미생성 — 재로그인 시 A1 재진입 (서버 판정) |

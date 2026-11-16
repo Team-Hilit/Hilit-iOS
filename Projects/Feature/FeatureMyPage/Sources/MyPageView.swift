@@ -61,6 +61,7 @@ public struct MyPageView: View {
         .hilitModal(item: store.presentedModal) { modal in
             MyPageModalCard(
                 modal: modal,
+                availability: store.availability,
                 onCancel: { send(.userTappedModalCancel) },
                 onConfirm: { send(.userTappedModalConfirm) }
             )

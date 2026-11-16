@@ -74,7 +74,7 @@ struct MyPageEntryTests {
         await store.receive(\.inner.entryLoaded) {
             $0.profile = .init(profile: Self.profile)
             $0.portfolio = .init(list: Self.list)
-            $0.replaceAvailable = false
+            $0.availability.replaceAvailable = false
             $0.isInterviewInProgress = true
             $0.reports = [MyPageFeature.Report(summary: Self.summary)!]
         }
@@ -102,7 +102,7 @@ struct MyPageEntryTests {
         await store.receive(\.inner.entryLoaded) {
             $0.profile = .init(profile: Self.profile)
             $0.portfolio = .init(list: Self.list)
-            $0.replaceAvailable = false
+            $0.availability.replaceAvailable = false
             $0.isInterviewInProgress = true
             $0.reports = [MyPageFeature.Report(summary: Self.summary)!]
         }

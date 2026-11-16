@@ -86,7 +86,7 @@ struct FeatureMyPageExampleApp: App {
     private static let deleted = LockIsolated(false)
 
     /// 가짜 포폴 — READY 1건(삭제 후엔 빈 목록). `.processing` 으로 바꾸면 «처리 중» 판, 시작부터 빈 판은 `deleted` 초기값 true.
-    /// `replaceAvailable: false` 로 바꾸면 삭제 확인 모달의 «다음 달 1일부터» 고지가 보인다.
+    /// `replaceAvailable: false` + `nextAvailableAt` 이면 삭제 확인 모달에 «M월 d일부터» 고지가, 빈 판 업로드에 차단 모달이 뜬다.
     private static var list: PortfolioList {
         PortfolioList(
             portfolios: deleted.value ? [] : [

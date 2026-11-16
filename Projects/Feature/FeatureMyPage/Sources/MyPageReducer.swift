@@ -130,11 +130,11 @@ extension MyPageFeature {
             }
 
         case .userTappedRemovePortfolio:
-            // 면접 중에는 지울 수 없다(PRD — 삭제 차단 사유는 이것뿐). 안내줄은 재업로드 가능 여부 고지.
+            // 면접 중에는 지울 수 없다(PRD). 안내줄은 재업로드 가능 여부 고지.
             if state.isInterviewInProgress {
-                state.presentedModal = .deleteBlocked(canReupload: state.replaceAvailable)
+                state.presentedModal = .deleteBlocked(.interviewInProgress)
             } else {
-                state.presentedModal = .deleteConfirm(canReupload: state.replaceAvailable)
+                state.presentedModal = .deleteConfirm
             }
             return .none
 
@@ -164,9 +164,7 @@ extension MyPageFeature {
             state.isFilePickerPresented = true
             return .none
         }
-        state.presentedModal = state.replaceAvailable
-            ? .replaceConfirm(remaining: 1)
-            : .replaceBlocked(remaining: 0)
+        state.presentedModal = state.availability.replaceAvailable ? .replaceConfirm : .replaceBlocked
         return .none
     }
 
@@ -254,7 +252,7 @@ extension MyPageFeature {
         case let .entryLoaded(profile, list, reports):
             state.profile = .init(profile: profile)
             state.portfolio = .init(list: list)
-            state.replaceAvailable = list.replaceAvailable ?? true
+            state.availability = list.availability
             state.isInterviewInProgress = list.portfolios.first?.interviewInProgress ?? false
             state.reports = IdentifiedArray(uniqueElements: reports.compactMap(Report.init(summary:)))
             // 재조회로 사라진 세션의 펼침만 버린다 — 남은 펼침은 그대로 둔다(깜빡임 방지, 홈과 같은 규칙).
@@ -281,6 +279,7 @@ extension MyPageFeature {
         case let .portfolioFileURLLoaded(url):
             state.portfolioPreview = .init(url: url)
             return .none
+
 
         case .portfolioDeleteFailed:
             state.alert = .plain(message: "잠시 후 다시 시도해 주세요.")

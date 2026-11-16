@@ -130,7 +130,7 @@ struct MyPageUploadCancelTests {
         await store.receive(\.inner.entryLoaded) {
             $0.portfolio = .init(list: UploadFixture.readyList)
             $0.uploadServerID = nil
-            $0.replaceAvailable = false
+            $0.availability.replaceAvailable = false
         }
     }
 
