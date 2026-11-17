@@ -302,7 +302,7 @@ struct InterviewSessionResumeSeedTests {
 
         await clock.advance(by: .seconds(1))
         await store.receive(\.inner.clockTicked)
-        #expect(store.state.effectiveElapsedSeconds == 61)   // 1:01
+        #expect(store.state.elapsedSeconds == 61)   // 1:01
     }
 
     // 근사 시드(30) ≠ 실측(63.6→64) 으로 값을 벌려 둔다 — 같은 수로 두면 «반환값을 버리는» 구현도

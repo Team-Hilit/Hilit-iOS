@@ -90,7 +90,7 @@ public struct InterviewSessionView: View {
         InterviewTimerChip(
             variant: store.phase == .finalCountdown
                 ? .countdown(remaining: store.countdownRemaining)
-                : .elapsed(seconds: store.effectiveElapsedSeconds)
+                : .elapsed(seconds: store.elapsedSeconds)
         )
     }
 

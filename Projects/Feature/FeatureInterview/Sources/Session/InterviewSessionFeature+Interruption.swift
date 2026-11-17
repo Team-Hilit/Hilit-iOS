@@ -43,7 +43,14 @@ extension InterviewSessionFeature {
     }
 
     /// 동결 본체 — 진행 중 effect 를 끊고 세그먼트를 닫은 뒤 이탈을 통보한다.
-    private func freezeAndLeave(_ state: inout State) -> Effect<Action> {
+    /// 네트워크 실패의 마감·재개 녹화가 비행 중이면(오버레이가 아직 없거나 이미 걷힌 창) 그 전환이 끝날 때까지 미룬다 —
+    /// `capturePaused`·`captureResumed` 가 `deferringCaptureTransition: false` 로 다시 부른다(HLT-41).
+    func freezeAndLeave(_ state: inout State, deferringCaptureTransition: Bool = true) -> Effect<Action> {
+        if deferringCaptureTransition, state.isCapturePaused, state.failure == nil {
+            state.isLeavePending = true
+            return .none
+        }
+        state.isLeavePending = false
         state.isInterrupted = true
         state.isEarlyExitWarningPresented = false
         state.isExitConfirmPresented = false

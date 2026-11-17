@@ -186,8 +186,8 @@ struct InterviewSessionFeatureTests {
         }
     }
 
-    @Test("네트워크 실패는 열린 모달을 닫고 질문 재생만 끊는다 — 시계·마이크는 살고 유효시간만 멈춘다")
-    func networkFailureKeepsSessionAliveUnderOverlay() async {
+    @Test("네트워크 실패는 열린 모달을 닫고 질문 재생·시계를 끊고 녹화·마이크를 마감한다(HLT-41)")
+    func networkFailureStopsCaptureUnderOverlay() async {
         let clock = TestClock()
         var initialState = InterviewSessionFeature.State.fixture()
         initialState.isExitConfirmPresented = true
@@ -219,8 +219,11 @@ struct InterviewSessionFeatureTests {
             $0.interviewClient.abandonSession = { _, _ in .stub }
             $0.heldSessionStore.clear = {}
             $0.ignoreHeldSessionStamp()
+            $0.speechClient.finishSessionAudioRecording = { nil }
+            $0.recordingClient.suspendRecording = { _ in 1 }
+            $0.speechClient.stopCapture = {}
         }
-        store.exhaustivity = .off   // 시계 틱은 기존 테스트가 고정 — 여기선 오버레이 전후 생존만 본다.
+        store.exhaustivity = .off   // 시계 틱은 기존 테스트가 고정 — 여기선 오버레이 전후만 본다.
 
         await store.send(.view(.onAppear))
         await store.receive(\.inner.recordingStarted)
@@ -228,6 +231,7 @@ struct InterviewSessionFeatureTests {
         await store.skipReceivedActions()
 
         await store.send(.inner(.networkFailureDetected(.playQuestion)))
+        await store.receive(\.inner.capturePaused)   // 마감이 끝나야 오버레이가 뜬다
         #expect(store.state.failure == InterviewFailureFeature.State(kind: .network))
         #expect(store.state.pendingRetry == .playQuestion)
         #expect(store.state.isExitConfirmPresented == false)
@@ -236,17 +240,13 @@ struct InterviewSessionFeatureTests {
         //    취소가 빠지면 지연된 .finished 가 questionPlaybackFinished 를 쏴 phase·마킹이 밀리고,
         //    답변 기록 시작(startAnswerRecording — 미스텁)까지 불려 unimplemented 로도 잡힌다.
         await clock.advance(by: .seconds(5))
-        await store.skipReceivedActions()
         #expect(store.state.phase == .asking)
         #expect(store.state.questionAudioEndedAt == nil)
 
-        // ② 세션을 살린 채 덮는 게 이 경로의 계약이다(스펙 ③) — 시계 effect 는 계속 tick 을 보내고,
-        //    그 tick 은 영상 축(elapsed)만 밀며 유효시간은 정지 구간(suspended)으로 접힌다.
-        #expect(store.state.elapsedSeconds == 6)
-        #expect(store.state.suspendedSeconds == 5)
-        #expect(store.state.effectiveElapsedSeconds == 1)
+        // ② 녹화가 멈췄으니 시계도 멈춘다(HLT-41) — 녹화 없는 시간은 영상 축도 면접 판정도 아니다.
+        #expect(store.state.elapsedSeconds == 1)
 
-        // ③ 나머지 정리(시계·마이크)는 오버레이의 «중단하기» 몫으로 옮겨졌다 — 남으면 finish 가 잡는다.
+        // ③ 남은 정리는 오버레이의 «중단하기» 몫 — 남으면 finish 가 잡는다.
         await store.send(.failure(.presented(.delegate(.closeRequested))))
         await store.receive(\.delegate.aborted)
         await store.finish()
@@ -413,6 +413,10 @@ struct InterviewSessionSubmissionTests {
                 attempts.withValue { $0 += 1 }
                 throw InterviewError.aiTemporarilyUnavailable
             }
+            // 소진 뒤 오버레이 앞의 녹화·마이크 마감(HLT-41) — 순서는 InterviewSessionNetworkFailureTests 가 고정.
+            $0.speechClient.finishSessionAudioRecording = { nil }
+            $0.recordingClient.suspendRecording = { _ in nil }
+            $0.speechClient.stopCapture = {}
         }
 
         await store.send(.view(.userTappedAnswerComplete)) {
@@ -424,8 +428,11 @@ struct InterviewSessionSubmissionTests {
         await store.receive(\.inner.answerSubmissionFailed) {
             $0.isSubmitting = false
             // 소진은 delegate 승격이 아니라 세션 소유 오버레이다 — 실패한 payload 를 그대로 들고 재개를 기다린다.
-            $0.failure = InterviewFailureFeature.State(kind: .network)
             $0.pendingRetry = .submit(AnswerSubmission(questionId: 1, isWrapUp: false))
+            $0.isCapturePaused = true
+        }
+        await store.receive(\.inner.capturePaused) {
+            $0.failure = InterviewFailureFeature.State(kind: .network)   // 마감이 끝난 뒤에 뜬다
         }
         #expect(attempts.value == 3)
     }
