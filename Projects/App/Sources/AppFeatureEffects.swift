@@ -212,31 +212,19 @@ extension AppFeature {
 
     // MARK: - 앱 사망 세션 정리
 
-    /// 앱 사망 세션 정리(스펙 ④) — 재개할 수 없는 보관값(영구 보관 이전 빌드가 남긴 죽은 프로세스 값)을 서버에
-    /// USER_EXIT 로 닫고 로컬을 걷는다. 지금 빌드의 값은 원장이 디스크에 남아 홈 [이어서 진행] 으로 잇는다(HLT-78).
-    /// 실패(오프라인·미로그인 401 등)는 보관값 유지 — 다음 실행이 재시도하고, 그동안 홈 카드는
-    /// 같은 술어(`isResumable`)가 막는다(스펙 ⑤). 홈 렌더와 레이스해도 같은 이유로 무해하다.
+    /// 앱 사망 세션 정리(스펙 ④) — 재개할 수 없는 보관값(영구 보관 이전 빌드가 남긴 죽은 프로세스 값)을 **로컬에서만**
+    /// 걷는다(HLT-42, PM 결정 2026-10-24 — Android 와 같게). 옛 동작은 아직 RESUMABLE 이면 USER_EXIT 로 서버 세션을
+    /// 닫아 진행분 리포트·이용권 차감을 일으켰다. 이제 서버 세션은 hold 20분 만료가 리포트 없이 닫고 환급한다.
+    /// 지금 빌드의 값은 원장이 디스크에 남아 홈 [이어서 진행] 으로 잇는다(HLT-78) — 대상이 아니다.
     ///
     /// 그에 앞서 **장부 세션이 아닌 보관 파일을 전부 회수한다** — 세그먼트가 영구 보관이라 정리 경로가 하나라도
     /// 빠지면(정리 도중 앱이 죽는 등) 쌓이기만 한다. 장부 세션 것은 남긴다: 재개 재료이거나, 아래 정리가 지운다.
     func cleanUpDeadHeldSession() -> Effect<Action> {
-        .run { [heldSessionStore, interviewClient, recordingClient] _ in
+        .run { [heldSessionStore, recordingClient] _ in
             await recordingClient.purgeStaleRecordings(heldSessionStore.load()?.sessionId)
             guard let sessionId = HeldSessionCleanup.target(heldSessionStore.load()) else { return }
-            do {
-                let check = try await interviewClient.checkResume(sessionId)
-                if HeldSessionCleanup.followup(check) == .abandonUserExit {
-                    _ = try await interviewClient.abandonSession(sessionId, .userExit)
-                }
-            } catch InterviewError.sessionAlreadyEnded {
-                // 이미 중단 완료(409) — 목적 달성으로 간주([처음부터 시작] 과 같은 규약).
-            } catch InterviewError.sessionNotFound {
-                // 내 세션이 아니다(계정 전환 등 404) — 서버에 닫을 것이 없으니 로컬만 걷는다.
-            } catch {
-                return
-            }
-            // 정리를 시작한 그 장부일 때만 걷는다 — 서버 왕복 사이에 사용자가 새 면접을 시작했으면
-            // (온보딩 완주가 장부를 연다) 여기서 지우는 것이 살아 있는 세션의 장부다.
+            // 판정한 그 장부일 때만 걷는다 — 사이에 사용자가 새 면접을 시작했으면(온보딩 완주가 장부를 연다)
+            // 여기서 지우는 것이 살아 있는 세션의 장부다.
             guard heldSessionStore.clearIfHolding(sessionId) else { return }
             await recordingClient.purgeRecordings(sessionId)
         }

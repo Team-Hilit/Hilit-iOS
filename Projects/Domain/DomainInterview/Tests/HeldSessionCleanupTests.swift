@@ -51,12 +51,4 @@ struct HeldSessionCleanupTests {
             HeldSession(sessionId: 7, recordedSeconds: 0, hasStarted: false, processToken: nil)
         ) == nil)
     }
-
-    @Test("판정 후속 — RESUMABLE 은 USER_EXIT 중단, ENDED 는 로컬 정리뿐(서버가 이미 끝냈다)")
-    func followupByVerdict() {
-        let resumable = InterviewResumeCheck(resumeState: .resumable, startedAt: nil, elapsedSeconds: 60, status: nil)
-        let ended = InterviewResumeCheck(resumeState: .ended, startedAt: nil, elapsedSeconds: nil, status: .abandoned)
-        #expect(HeldSessionCleanup.followup(resumable) == .abandonUserExit)
-        #expect(HeldSessionCleanup.followup(ended) == .clearAndPurge)
-    }
 }
