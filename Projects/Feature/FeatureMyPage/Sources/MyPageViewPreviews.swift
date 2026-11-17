@@ -82,6 +82,12 @@ import SwiftUI
     return MyPageView(store: Store(initialState: state) { MyPageFeature() })
 }
 
+#Preview("모달 — 로그아웃 확인") {
+    var state = MyPageFeature.State.filled
+    state.presentedModal = .logoutConfirm
+    return MyPageView(store: Store(initialState: state) { MyPageFeature() })
+}
+
 #Preview("모달 — 로딩") {
     var state = MyPageFeature.State.filled
     state.presentedModal = .loading

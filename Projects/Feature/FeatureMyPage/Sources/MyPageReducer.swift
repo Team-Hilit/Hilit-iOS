@@ -52,11 +52,9 @@ extension MyPageFeature {
             return .none
 
         case .userTappedLogout:
-            // 실패 취급 없음 — AuthClient.logout 은 defer 로 서버 결과와 무관하게 로컬 토큰을 지운다.
-            return .run { send in
-                try? await authClient.logout()
-                await send(.delegate(.loggedOut))
-            }
+            // 바로 끊지 않고 확인 모달을 먼저 띄운다 — 실제 로그아웃은 모달 확인(reduceModalConfirm)에서.
+            state.presentedModal = .logoutConfirm
+            return .none
 
         case .userTappedWithdraw:
             // 진행 중 면접이 참조하는 데이터가 도중에 사라지는 상황 차단(PRD 수용 기준 12).
@@ -170,11 +168,17 @@ extension MyPageFeature {
         return .none
     }
 
-    /// 모달 오른쪽 버튼. 삭제는 서버로 나가고, 교체는 파일 선택기를 연다.
+    /// 모달 오른쪽 버튼. 삭제는 서버로 나가고, 교체는 파일 선택기를 열고, 로그아웃은 세션을 끊는다.
     private func reduceModalConfirm(_ state: inout State) -> Effect<Action> {
         let modal = state.presentedModal
         state.presentedModal = nil
         switch modal {
+        case .logoutConfirm:
+            // 실패 취급 없음 — AuthClient.logout 은 defer 로 서버 결과와 무관하게 로컬 토큰을 지운다.
+            return .run { send in
+                try? await authClient.logout()
+                await send(.delegate(.loggedOut))
+            }
         case .deleteConfirm:
             // 낙관 갱신 없음 — 성공 시 전체 재조회가 포폴 칸·가용성·리포트 «삭제된 포트폴리오» 를 함께 맞춘다.
             guard case let .registered(file) = state.portfolio else { return .none }
