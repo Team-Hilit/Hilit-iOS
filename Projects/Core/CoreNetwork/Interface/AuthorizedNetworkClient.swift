@@ -10,7 +10,8 @@ import Foundation
 
 // @lat: [[api#토큰 수명주기]]
 // 인증 요청 전용 transport — `NetworkClient` 위에 D14 토큰 규약을 얹는다:
-// Bearer 첨부(TokenStore) → `TOKEN_EXPIRED`/`INVALID_TOKEN` 이면 단일 비행 재발급 후 원요청 1회 재시도.
+// Bearer 첨부(TokenStore) → 401 + `TOKEN_EXPIRED`/`INVALID_TOKEN` 이면 단일 비행 재발급 후 원요청 1회 재시도.
+// 403(정지·이용권 소진 등 업무 거절)은 재발급 없이 그대로 던진다.
 // `LOGIN_EXPIRED`(리프레시도 만료)면 토큰을 폐기하고 던진다 — 앱 레벨 재로그인 신호.
 // 실패 표면은 NetworkClient 와 동일(NetworkError·CancellationError) + `NotAuthenticatedError`(로컬 토큰 없음).
 public struct AuthorizedNetworkClient: Sendable {

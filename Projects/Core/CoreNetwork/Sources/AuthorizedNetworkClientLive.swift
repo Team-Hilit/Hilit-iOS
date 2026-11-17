@@ -66,13 +66,11 @@ final class AuthorizedEngine: Sendable {
         }
     }
 
-    /// 액세스 토큰 만료 판정 — **모든 API 에서 403 = 만료**(서버 계약 2026-08-02)라 body 코드와 무관하게
-    /// 재발급을 트리거한다. 코드 기반 판정(TOKEN_EXPIRED·INVALID_TOKEN)은 403 이 아닌 상태로 내려오는
-    /// 케이스를 위해 유지한다.
+    /// 액세스 토큰 만료 판정 — **401 + `TOKEN_EXPIRED`·`INVALID_TOKEN`** 일 때만 재발급한다(HLT-57 PM 결정).
+    /// 403 은 권한·업무 거절(계정 정지·이용권 소진 등)이라 재발급·재시도 없이 그대로 던져 코드별 안내로 보낸다.
     private func isTokenExpiry(_ error: NetworkError) -> Bool {
-        guard case .statusCode(let status, let body) = error else { return false }
-        if status == 403 { return true }
-        guard let serverError = ServerError.decode(statusCode: status, body: body) else { return false }
+        guard case .statusCode(let status, let body) = error, status == 401,
+              let serverError = ServerError.decode(statusCode: status, body: body) else { return false }
         return Self.refreshTriggerCodes.contains(serverError.code)
     }
 

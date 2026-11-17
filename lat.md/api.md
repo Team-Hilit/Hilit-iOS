@@ -30,7 +30,7 @@ YAPP APP 1팀 백엔드(D14 API v1)와의 연동 지식. 서버 태그(AppVersio
 JWT — Access 3시간 / Refresh 7일, Rotation(재발급 시 페어가 통째로 교체). 보관은 Keychain(`TokenStore`). Feature 는 토큰의 존재를 모른다.
 
 - 인증 필요 요청은 전부 `AuthorizedNetworkClient` 를 쓴다 — Bearer 첨부 후 만료 감지 시 **단일 비행** 재발급 → 원요청 1회 재시도. (Rotation 이라 중복 재발급 = 로그아웃 사고 → actor 직렬화)
-- 만료 판정 2중: **HTTP 403 이면 body 와 무관하게 만료**(서버 계약 2026-08-02 — 모든 API 공통) + `TOKEN_EXPIRED`/`INVALID_TOKEN` 코드(403 이 아닌 상태로 오는 케이스 방어).
+- 만료 판정: **401 + `TOKEN_EXPIRED`/`INVALID_TOKEN`** 둘 다일 때만 재발급(HLT-57 PM 결정 · Android 와 통일). 403 은 권한·업무 거절(계정 정지·이용권 소진 등)이라 재발급·재시도 없이 그대로 던져 도메인 에러 → 코드별 안내로 간다.
 - `LOGIN_EXPIRED` = Refresh 도 만료 → 토큰 폐기 후 전파. 앱 레벨 재로그인 라우팅 신호.
 - 로컬 토큰이 아예 없으면 요청 전에 `NotAuthenticatedError` — 로그인 화면 유도.
 - 저장(로그인)·삭제(로그아웃)는 [[api#Auth]] 의 AuthClient 책임.
