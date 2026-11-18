@@ -47,7 +47,7 @@ Projects/
 - 테스트: `make test scheme=FeatureHome` 권장 (시뮬레이터 UDID 자동 해석).
 - **umbrella 의존 변경 후 `tuist generate` 필수** — 캐시 그래프 빌드는 "거짓 성공".
 - DocC: `ArchitectureDocs` 스킴 → Product → Build Documentation.
-- **PR 올리기**: base 는 항상 `dev`(feature→dev). `gh pr create --repo YAPP-Github/28th-App-Team-1-iOS --base dev --head "$(git branch --show-current)" --title "type: 요약" --body-file <본문.md>` — 본문은 `.github/pull_request_template.md` 형식(관련 이슈 `Close #N`/작업 내역/리뷰 포인트/체크리스트). 상세 `CONTRIBUTING.md`, squash 머지. gh 미인증 시 `gh auth login`.
+- **PR 올리기**: base 는 항상 `dev`(feature→dev). `gh pr create --repo Team-Hilit/Hilit-iOS --base dev --head "$(git branch --show-current)" --title "type: 요약" --body-file <본문.md>` — 본문은 `.github/pull_request_template.md` 형식(관련 이슈 `Close #N`/작업 내역/리뷰 포인트/체크리스트). 상세 `CONTRIBUTING.md`, squash 머지. gh 미인증 시 `gh auth login`.
 
 ## lat.md 지식 그래프
 
