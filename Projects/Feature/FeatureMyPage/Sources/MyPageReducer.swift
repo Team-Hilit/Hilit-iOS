@@ -65,7 +65,7 @@ extension MyPageFeature {
             }
             return .none
 
-        // 포폴 칸 한 덩어리 — 업로드·교체·삭제와 그 모달은 서로 물려 있어 한 함수에서 읽는다.
+        // 포폴 칸 + 화면 모달 — 업로드·교체·삭제와 그 모달은 서로 물려 있어 한 함수에서 읽는다(로그아웃 확인 모달도 같은 확인·취소 액션을 탄다).
         case .userTappedUploadPortfolio, .fileSelected, .fileSelectionFailed,
              .userTappedCancelUpload, .userTappedPortfolioFile, .userTappedRemovePortfolio,
              .userTappedPortfolioTooltip, .userTappedModalCancel, .userTappedModalConfirm:
@@ -88,7 +88,7 @@ extension MyPageFeature {
         }
     }
 
-    /// «내 포트폴리오» 칸 — 업로드·교체·삭제와 그 모달. 나머지 View 액션은 reduceView 가 처리한다.
+    /// «내 포트폴리오» 칸 — 업로드·교체·삭제와 그 모달, 그리고 화면 모달 공통 확인·취소(로그아웃 확인 포함). 나머지 View 액션은 reduceView 가 처리한다.
     private func reducePortfolio(_ state: inout State, _ action: Action.View) -> Effect<Action> {
         switch action {
         case .userTappedUploadPortfolio:
