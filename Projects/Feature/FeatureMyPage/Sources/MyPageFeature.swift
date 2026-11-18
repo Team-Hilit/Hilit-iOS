@@ -156,6 +156,8 @@ public struct MyPageFeature {
         case replaceBlocked
         /// 처리 중 (435:8897 modal/loading)
         case loading
+        /// 로그아웃하시겠어요? — 계정 줄 «로그아웃» 탭 뒤 한 번 더 묻는다(안드로이드 빌드 캡처 기준, Figma 모달 모음엔 없다).
+        case logoutConfirm
     }
 
     /// 삭제를 막는 사유 — 진행 중 면접 + 이번 달 삭제 한도(서버 `DELETE_LIMIT_EXCEEDED`, HLT-107 — Android 와 같은 게이트).

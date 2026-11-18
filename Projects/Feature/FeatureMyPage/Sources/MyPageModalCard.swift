@@ -84,6 +84,12 @@ struct MyPageModalCard: View {
 
         case .loading:
             LoadingModal()
+
+        case .logoutConfirm:
+            // 카피는 안드로이드 빌드 캡처 기준 — Figma 모달 모음에 없는 모달이라 시안 노드가 없다.
+            Modal("로그아웃하시겠어요?", subText: "언제든 다시 로그인할 수 있어요.") {
+                buttons(cancel: "취소", confirm: "로그아웃")
+            }
         }
     }
 
@@ -161,6 +167,13 @@ private let previewNextMonth = Date(timeIntervalSince1970: 1_798_729_200) // 202
                 onCancel: {},
                 onConfirm: {}
             )
+        }
+}
+
+#Preview("로그아웃 확인") {
+    Color.GrayScale.g50
+        .hilitModal(isPresented: true) {
+            MyPageModalCard(modal: .logoutConfirm, onCancel: {}, onConfirm: {})
         }
 }
 
