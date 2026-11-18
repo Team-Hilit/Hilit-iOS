@@ -12,6 +12,7 @@ public struct TargetFactory {
     var entitlements: Entitlements?
     var sources: SourceFilesList?
     var resources: ResourceFileElements?
+    var buildableFolders: [BuildableFolder]
     var scripts: [TargetScript]
     var dependencies: [TargetDependency]
     var settings: Settings?
@@ -26,6 +27,7 @@ public struct TargetFactory {
         entitlements: Entitlements? = nil,
         sources: SourceFilesList? = nil,
         resources: ResourceFileElements? = nil,
+        buildableFolders: [BuildableFolder] = [],
         scripts: [TargetScript] = [],
         dependencies: [TargetDependency] = [],
         settings: Settings? = nil
@@ -39,9 +41,18 @@ public struct TargetFactory {
         self.entitlements = entitlements
         self.sources = sources
         self.resources = resources
+        self.buildableFolders = buildableFolders
         self.scripts = scripts
         self.dependencies = dependencies
         self.settings = settings
+    }
+
+    /// 기본 폴더를 buildable folder(Xcode 동기화 폴더)로 연결한다 — 폴더 안 파일 추가·삭제가
+    /// `tuist generate` 없이 Xcode 에 바로 반영된다. 소스뿐 아니라 리소스(xcassets·폰트 등)도 함께 실린다.
+    /// `sources` 를 직접 넘긴 타겟은 그 glob 을 그대로 쓴다(중복 포함 방지).
+    mutating func useFolders(_ paths: BuildableFolder...) {
+        guard sources == nil else { return }
+        buildableFolders += paths
     }
 }
 
@@ -60,6 +71,7 @@ public extension Target {
             infoPlist: factory.infoPlist,
             sources: factory.sources,
             resources: factory.resources,
+            buildableFolders: factory.buildableFolders,
             entitlements: factory.entitlements,
             scripts: factory.scripts,
             dependencies: factory.dependencies,
@@ -151,8 +163,9 @@ public extension Target {
             "com.apple.developer.applesignin": ["Default"],
             "com.apple.developer.associated-domains": ["applinks:hilit.chottu.link"]
         ])
-        f.sources = f.sources ?? ["Sources/**"]
-        f.resources = f.resources ?? ["Resources/**"]   // Assets.xcassets(AppIcon 등) — 누락 시 앱 번들에 에셋이 안 들어간다
+        f.useFolders("Sources")
+        // Assets.xcassets(AppIcon 등) — 누락 시 앱 번들에 에셋이 안 들어간다
+        if f.resources == nil { f.buildableFolders.append("Resources") }
         f.scripts = f.scripts + [.kakaoKeyGuard]        // 배포 계(QA/Release)에서 카카오 키 미설정 시 빌드 실패
         f.settings = f.settings ?? .settings(
             base: compositionRootBase,   // -all_load (D4) — settings 를 교체해도 이 base 는 유지할 것
@@ -174,8 +187,7 @@ public extension Target {
         f.name = "ArchitectureDocs"
         f.product = .framework
         f.bundleId = "\(Project.Environment.bundlePrefix).docs"
-        f.sources = f.sources ?? ["Documentation/Sources/**"]
-        f.resources = f.resources ?? ["Documentation/Architecture.docc/**"]
+        f.useFolders("Documentation")   // Documentation/Sources + Architecture.docc
         return make(factory: f)
     }
 
@@ -187,28 +199,28 @@ public extension Target {
     static func core(factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Core"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         return make(factory: f)
     }
 
     static func domain(factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Domain"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         return make(factory: f)
     }
 
     static func feature(factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Feature"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         return make(factory: f)
     }
 
     static func shared(factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Shared"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         return make(factory: f)
     }
 
@@ -221,7 +233,7 @@ public extension Target {
     static func feature(implements name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Feature\(name)Implementation"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         f.scripts = [.swiftLint]
         return make(factory: f)
     }
@@ -229,7 +241,7 @@ public extension Target {
     static func feature(testing name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Feature\(name)Testing"
-        f.sources = f.sources ?? ["Testing/**"]
+        f.useFolders("Testing")
         f.dependencies = [.target(name: "Feature\(name)Implementation")] + f.dependencies
         return make(factory: f)
     }
@@ -238,7 +250,7 @@ public extension Target {
         var f = factory
         f.name = "Feature\(name)Tests"
         f.product = .unitTests
-        f.sources = f.sources ?? ["Tests/**"]
+        f.useFolders("Tests")
         f.dependencies = [
             .target(name: "Feature\(name)Implementation"),
             .target(name: "Feature\(name)Testing")
@@ -265,7 +277,7 @@ public extension Target {
             // 모듈이 Example/Resources/Assets.xcassets 에 AppIcon 을 두면 이 이름으로 컴파일된다.
             "CFBundleIconName": "AppIcon"
         ])
-        f.sources = f.sources ?? ["Example/**"]
+        f.useFolders("Example")
         f.dependencies = [.target(name: "Feature\(name)Implementation")] + f.dependencies
         // base 의 -all_load: Domain Implementation(liveValue) link 시에도 활성화 보장 (D4)
         f.settings = f.settings ?? .settings(
@@ -285,7 +297,7 @@ public extension Target {
     static func core(interface name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Core\(name)Interface"
-        f.sources = f.sources ?? ["Interface/**"]
+        f.useFolders("Interface")
         f.scripts = [.swiftLint]
         return make(factory: f)
     }
@@ -293,7 +305,7 @@ public extension Target {
     static func core(implements name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Core\(name)Implementation"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         f.scripts = [.swiftLint]
         f.dependencies = [.target(name: "Core\(name)Interface")] + f.dependencies
         return make(factory: f)
@@ -302,7 +314,7 @@ public extension Target {
     static func core(testing name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Core\(name)Testing"
-        f.sources = f.sources ?? ["Testing/**"]
+        f.useFolders("Testing")
         f.dependencies = [.target(name: "Core\(name)Interface")] + f.dependencies
         return make(factory: f)
     }
@@ -311,7 +323,7 @@ public extension Target {
         var f = factory
         f.name = "Core\(name)Tests"
         f.product = .unitTests
-        f.sources = f.sources ?? ["Tests/**"]
+        f.useFolders("Tests")
         f.dependencies = [
             .target(name: "Core\(name)Implementation"),
             .target(name: "Core\(name)Testing")
@@ -324,7 +336,7 @@ public extension Target {
     static func domain(interface name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Domain\(name)Interface"
-        f.sources = f.sources ?? ["Interface/**"]
+        f.useFolders("Interface")
         f.scripts = [.swiftLint]
         return make(factory: f)
     }
@@ -332,7 +344,7 @@ public extension Target {
     static func domain(implements name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Domain\(name)Implementation"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         f.scripts = [.swiftLint]
         f.dependencies = [.target(name: "Domain\(name)Interface")] + f.dependencies
         return make(factory: f)
@@ -341,7 +353,7 @@ public extension Target {
     static func domain(testing name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Domain\(name)Testing"
-        f.sources = f.sources ?? ["Testing/**"]
+        f.useFolders("Testing")
         f.dependencies = [.target(name: "Domain\(name)Interface")] + f.dependencies
         return make(factory: f)
     }
@@ -350,7 +362,7 @@ public extension Target {
         var f = factory
         f.name = "Domain\(name)Tests"
         f.product = .unitTests
-        f.sources = f.sources ?? ["Tests/**"]
+        f.useFolders("Tests")
         f.dependencies = [
             .target(name: "Domain\(name)Implementation"),
             .target(name: "Domain\(name)Testing")
@@ -363,7 +375,7 @@ public extension Target {
     static func shared(interface name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Shared\(name)Interface"
-        f.sources = f.sources ?? ["Interface/**"]
+        f.useFolders("Interface")
         f.scripts = [.swiftLint]
         return make(factory: f)
     }
@@ -371,7 +383,7 @@ public extension Target {
     static func shared(implements name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Shared\(name)Implementation"
-        f.sources = f.sources ?? ["Sources/**"]
+        f.useFolders("Sources")
         f.scripts = [.swiftLint]
         f.dependencies = [.target(name: "Shared\(name)Interface")] + f.dependencies
         return make(factory: f)
@@ -380,7 +392,7 @@ public extension Target {
     static func shared(testing name: String, factory: TargetFactory = .init()) -> Self {
         var f = factory
         f.name = "Shared\(name)Testing"
-        f.sources = f.sources ?? ["Testing/**"]
+        f.useFolders("Testing")
         f.dependencies = [.target(name: "Shared\(name)Interface")] + f.dependencies
         return make(factory: f)
     }
@@ -389,7 +401,7 @@ public extension Target {
         var f = factory
         f.name = "Shared\(name)Tests"
         f.product = .unitTests
-        f.sources = f.sources ?? ["Tests/**"]
+        f.useFolders("Tests")
         f.dependencies = [
             .target(name: "Shared\(name)Implementation"),
             .target(name: "Shared\(name)Testing")
