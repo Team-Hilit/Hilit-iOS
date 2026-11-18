@@ -27,8 +27,8 @@ brew install ripgrep        # 선택
 ## 1. 최초 셋업 (clone 직후)
 
 ```bash
-git clone https://github.com/YAPP-Github/28th-App-Team-1-iOS.git
-cd 28th-App-Team-1-iOS
+git clone https://github.com/Team-Hilit/Hilit-iOS.git
+cd Hilit-iOS
 
 # 1) 외부 의존(SPM) 해석 — ComposableArchitecture 등
 tuist install
