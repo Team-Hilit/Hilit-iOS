@@ -158,3 +158,6 @@ docs/superpowers/
 # (수 MB 짜리 JSON 은 재생성 가능, 설정은 각자 취향)
 # ──────────────────────────────────────────────────────────────
 .understand-anything/
+
+# 실기기 QA 결과 (Tools/DeviceQA/device-qa.sh)
+.device-qa/
