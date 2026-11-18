@@ -155,6 +155,8 @@ public struct MyPageFeature {
         case replaceBlocked(remaining: Int)
         /// 처리 중 (435:8897 modal/loading)
         case loading
+        /// 로그아웃하시겠어요? — 계정 줄 «로그아웃» 탭 뒤 한 번 더 묻는다(안드로이드 빌드 캡처 기준, Figma 모달 모음엔 없다).
+        case logoutConfirm
     }
 
     // MARK: - State

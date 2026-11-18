@@ -28,6 +28,6 @@
 - 의존은 `DomainAuth`·`DomainInterview`·`DomainPortfolio`·`DomainUser` 의 **Interface 만**이다. 리포트 목록은 `InterviewClient.reportList` 로 받으므로 단건 조회용 `DomainInterviewReport` 는 이 화면 밖이다.
 - 화면 밖으로 나가는 네 동선(리포트 열기·지인 피드백·로그아웃·회원탈퇴)은 전부 `delegate` 다. 직접 import 금지 — 조립은 AppFeature. → [[app#Cross-feature Routing]]
 - **파일 선택기는 이 동선에 없다** — `fileImporter` 를 화면에 직접 달아 업로드 진입 3곳(빈 판·«다시 올리기»·교체 확인)이 같은 자리로 모인다(온보딩 S2 와 같은 방식). 부모가 받아 줄 게 없으니 delegate 로 올릴 이유도 없다.
-- 로그아웃·탈퇴는 API·로컬 세션 정리까지 끝낸 뒤 **완료형**(`loggedOut`/`withdrawn`)으로 올린다. 면접 로컬 데이터(보관값·draft)는 마이페이지가 아니라 AppFeature 가 걷는다 → [[app#계정 로컬 정리]]. 탈퇴는 진행 중 면접이면 알럿으로 먼저 막고, 아니면 확인 알럿을 한 번 거친다.
+- 로그아웃·탈퇴는 API·로컬 세션 정리까지 끝낸 뒤 **완료형**(`loggedOut`/`withdrawn`)으로 올린다. 면접 로컬 데이터(보관값·draft)는 마이페이지가 아니라 AppFeature 가 걷는다 → [[app#계정 로컬 정리]]. 탈퇴는 진행 중 면접이면 알럿으로 먼저 막고, 아니면 확인 알럿을 한 번 거친다. 로그아웃도 «로그아웃» 탭이 바로 끊지 않고 확인 모달(`Modal.logoutConfirm`)을 먼저 띄운다 — 실제 호출은 모달 확인 버튼에서 일어난다.
 - AppFeature 가 홈 내비바 프로필로 present 하고, 닫으면 홈을 다시 태운다(포폴이 바뀌었을 수 있다). 완료형 `loggedOut`/`withdrawn` 은 루트를 로그인으로 되돌린다. 리포트 열기·지인 피드백은 2026-08-10 배선 완료 — 마이페이지를 **덮는** 리포트 커버로 열리고(닫으면 목록으로 복귀), 지인 피드백은 링크 생성 화면 직행이다 → [[app#Cross-feature Routing]].
 - 시안의 모달 버튼 라벨이 «버튼1 / 버튼2» 플레이스홀더라 카피가 임시다. 확정되면 `MyPageModalCard` 만 고친다.
