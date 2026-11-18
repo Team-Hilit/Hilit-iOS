@@ -26,3 +26,13 @@
 - 다른 브랜치가 쥐고 있으면 `기기 사용 중: <브랜치>` 로 멈춘다.
 - 끝나면 `make device-qa cmd=unlock` 으로 반납한다. 주인이 사라진 잠금만 `unlock --force` 로 푼다.
 - 잠금 위치는 `/tmp/hilit-device-qa.lock` (`DEVICE_QA_LOCK` 로 변경). 시뮬레이터는 잠그지 않는다.
+
+## 시나리오 나누기 (브랜치 간 충돌 방지)
+
+이슈 브랜치 여러 개가 동시에 시나리오를 늘려도 서로 같은 줄을 건드리지 않게 나눈다.
+
+- **파일**: 자기 이슈 폴더에만 추가한다 — `Projects/App/UITests/Issue<번호>/`. 클래스 이름도 `Issue<번호>…UITests` 로 시작한다.
+- **공용 코드**: `UITests/Support/`(`DeviceActions`·`UIQuery`·`SystemAlert`) 는 dev 에서만 고친다. 필요한 헬퍼는 자기 폴더에 `private` 로 두거나 dev 에 먼저 넣고 머지해 받는다.
+- **식별자**: `accessibilityIdentifier` 는 자기 Feature 화면에만 단다. 값은 `<feature>.<화면>.<요소>` (예: `interview.overlay.resume`). DesignSystem 공용 컴포넌트에는 달지 않는다.
+- **실행**: `make uitest device=<이름> only=Issue160UITests` — 자기 것만 돌린다. 클래스 접두어가 겹치지 않아 dev 에 다 모여도 그대로 쓴다.
+- 새 파일을 추가한 뒤에는 `tuist generate` 를 다시 돌린다.
