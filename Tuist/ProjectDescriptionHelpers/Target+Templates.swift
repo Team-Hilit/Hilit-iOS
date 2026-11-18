@@ -165,6 +165,25 @@ public extension Target {
         return make(factory: f)
     }
 
+    // MARK: UITests
+
+    /// App 대상 XCUITest 타겟 — 실기기에서 시뮬레이터로 못 보는 흐름(백그라운드·재실행·제어센터)을 자동화한다.
+    /// 서명(DEVELOPMENT_TEAM)이 실기기 실행에 필요해 앱과 같은 계별 xcconfig(Secrets 포함)를 쓴다. → docs/device-qa.md
+    static func uiTests(factory: TargetFactory = .init()) -> Self {
+        var f = factory
+        f.name = "\(Project.Environment.appName)UITests"
+        f.product = .uiTests
+        f.bundleId = f.bundleId ?? "\(Project.Environment.bundlePrefix).uitests"
+        f.sources = f.sources ?? ["UITests/**"]
+        f.dependencies = [.target(name: Project.Environment.appName)] + f.dependencies
+        f.settings = f.settings ?? .settings(configurations: [
+            .debug(name: "Dev", xcconfig: "Config/Dev.xcconfig"),
+            .release(name: "QA", xcconfig: "Config/QA.xcconfig"),
+            .release(name: "Release", xcconfig: "Config/Prod.xcconfig")
+        ])
+        return make(factory: f)
+    }
+
     // MARK: Docs
 
     /// 프로젝트 전역 DocC 카탈로그(Architecture.docc) 전용 호스트 타겟. 실행 코드 없음.

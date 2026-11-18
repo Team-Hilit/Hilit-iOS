@@ -11,7 +11,7 @@ else
   SEARCH = rg --type swift -n
 endif
 
-.PHONY: lat lat-all lat-deps lint lint-fix generate test scaffold-feature scaffold-domain scaffold-core scaffold-shared install-snippets
+.PHONY: device-qa generate install-snippets lat lat-all lat-deps lint lint-fix scaffold-core scaffold-domain scaffold-feature scaffold-shared test uitest
 
 # 특정 도메인과 엮인 코드 전부 (위키링크 [[도메인 으로 검색 → delegate 의존도 잡힘)
 lat:
@@ -92,3 +92,19 @@ test:
 		| sort -t. -k1,1n -k2,2n | tail -1 | awk '{print $$2}'); \
 	if [ -z "$$id" ]; then echo "❌ '$(device)' 는 '$(scheme)' 스킴의 destination 에 없음. 인식되는 시뮬레이터:"; printf '%s\n' "$$dests"; exit 1; fi; \
 	xcodebuild -workspace Hilit.xcworkspace -scheme $(scheme) -destination "platform=iOS Simulator,id=$$id" test
+
+# 실기기 QA 보조 (예: make device-qa cmd=force-kill [DEVICE=<udid|이름>])
+# devicectl 로 실행·강제 종료·스크린샷·컨테이너 수집. 결과는 .device-qa/<시각>/. → docs/device-qa.md
+device-qa:
+	@Tools/DeviceQA/device-qa.sh $(cmd)
+
+# 실기기 UI 테스트 (예: make uitest device='EunSeo iPhone') — 스킴 HilitUITests(Dev 계)
+# 시뮬레이터로 돌리려면 device='iPhone 16' 처럼 시뮬레이터 이름을 준다.
+uitest:
+	@[ -n "$(device)" ] || (echo "❌ device 필수. 예: make uitest device='EunSeo iPhone' (목록: xcrun devicectl list devices)"; exit 1)
+	@if xcrun simctl list devices available | grep -qF "$(device) ("; then \
+		dest="platform=iOS Simulator,name=$(device)"; \
+	else \
+		dest="platform=iOS,name=$(device)"; \
+	fi; \
+	xcodebuild -workspace Hilit.xcworkspace -scheme HilitUITests -destination "$$dest" -allowProvisioningUpdates test
