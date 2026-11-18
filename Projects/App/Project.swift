@@ -24,7 +24,9 @@ let project = Project.makeModule(
         .docs(factory: .init(dependencies: [
             .core, .domain, .feature, .shared,
             .composableArchitecture
-        ]))
+        ])),
+        // 실기기 XCUITest — 스킴 HilitUITests. → docs/device-qa.md
+        .uiTests()
     ],
     schemes: [
         // 환경별 앱 스킴 — Run/Archive 가 같은 계(Configuration)를 가리킨다. → DocC Environments
@@ -35,6 +37,14 @@ let project = Project.makeModule(
             name: "ArchitectureDocs",
             shared: true,
             buildAction: .buildAction(targets: ["ArchitectureDocs"])
+        ),
+        // Dev 계 앱 + UI 테스트. 실기기: make uitest device=<이름|UDID>
+        .scheme(
+            name: "HilitUITests",
+            shared: true,
+            buildAction: .buildAction(targets: ["Hilit", "HilitUITests"]),
+            testAction: .targets(["HilitUITests"], configuration: "Dev"),
+            runAction: .runAction(configuration: "Dev", executable: "Hilit")
         )
     ]
 )
