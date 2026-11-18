@@ -11,8 +11,8 @@ import Testing
 
 @MainActor
 struct MyPageAccountTests {
-    @Test("로그아웃 — 로컬 세션을 지우고 완료형 delegate 를 올린다")
-    func logoutClearsSessionAndNotifies() async {
+    @Test("로그아웃 탭 — 바로 끊지 않고 확인 모달만 띄운다")
+    func logoutTapPresentsConfirmModal() async {
         let loggedOut = LockIsolated(false)
         let store = TestStore(initialState: MyPageFeature.State()) {
             MyPageFeature()
@@ -20,9 +20,45 @@ struct MyPageAccountTests {
             $0.authClient.logout = { loggedOut.setValue(true) }
         }
 
-        await store.send(.view(.userTappedLogout))
+        await store.send(.view(.userTappedLogout)) {
+            $0.presentedModal = .logoutConfirm
+        }
+        #expect(!loggedOut.value)
+    }
+
+    @Test("로그아웃 확인 — 로컬 세션을 지우고 완료형 delegate 를 올린다")
+    func logoutConfirmClearsSessionAndNotifies() async {
+        let loggedOut = LockIsolated(false)
+        var state = MyPageFeature.State()
+        state.presentedModal = .logoutConfirm
+        let store = TestStore(initialState: state) {
+            MyPageFeature()
+        } withDependencies: {
+            $0.authClient.logout = { loggedOut.setValue(true) }
+        }
+
+        await store.send(.view(.userTappedModalConfirm)) {
+            $0.presentedModal = nil
+        }
         await store.receive(\.delegate.loggedOut)
         #expect(loggedOut.value)
+    }
+
+    @Test("로그아웃 확인에서 취소 — 모달만 닫고 세션은 그대로다")
+    func logoutCancelKeepsSession() async {
+        let loggedOut = LockIsolated(false)
+        var state = MyPageFeature.State()
+        state.presentedModal = .logoutConfirm
+        let store = TestStore(initialState: state) {
+            MyPageFeature()
+        } withDependencies: {
+            $0.authClient.logout = { loggedOut.setValue(true) }
+        }
+
+        await store.send(.view(.userTappedModalCancel)) {
+            $0.presentedModal = nil
+        }
+        #expect(!loggedOut.value)
     }
 
     @Test("면접 진행 중 탈퇴 시도 — 차단 안내만 띄운다")
