@@ -45,6 +45,7 @@ Projects/
 - **스토어·TestFlight 아카이브는 `TUIST_PRODUCT_TYPE=static-library` 를 앞에 붙여 generate 한 뒤** 뽑는다 — 기본 generate 는 dylib 을 수십 개 임베드해 중복 심볼 경고·느린 실행을 낳고, 정적 모드는 앱 바이너리 한 벌로 합친다.
 - 앱 스킴 `Hilit-Dev|QA|Prod`. Feature 단독 실행: `Feature{Name}` 스킴 ⌘R (Example 앱이 실행 타겟).
 - 테스트: `make test scheme=FeatureHome` 권장 (시뮬레이터 UDID 자동 해석).
+- 실기기 QA: `make uitest device=<이름>` · `make device-qa cmd=<명령>` — 기기는 브랜치 하나씩(잠금). 상세 `docs/device-qa.md`.
 - **umbrella 의존 변경 후 `tuist generate` 필수** — 캐시 그래프 빌드는 "거짓 성공".
 - DocC: `ArchitectureDocs` 스킴 → Product → Build Documentation.
 - **PR 올리기**: base 는 항상 `dev`(feature→dev). `gh pr create --repo Team-Hilit/Hilit-iOS --base dev --head "$(git branch --show-current)" --title "type: 요약" --body-file <본문.md>` — 본문은 `.github/pull_request_template.md` 형식(관련 이슈 `Close #N`/작업 내역/리뷰 포인트/체크리스트). 상세 `CONTRIBUTING.md`, squash 머지. gh 미인증 시 `gh auth login`.
