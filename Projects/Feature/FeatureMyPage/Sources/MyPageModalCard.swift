@@ -173,7 +173,7 @@ private let previewNextMonth = Date(timeIntervalSince1970: 1_798_729_200) // 202
 #Preview("로그아웃 확인") {
     Color.GrayScale.g50
         .hilitModal(isPresented: true) {
-            MyPageModalCard(modal: .logoutConfirm, onCancel: {}, onConfirm: {})
+            MyPageModalCard(modal: .logoutConfirm, availability: .init(), onCancel: {}, onConfirm: {})
         }
 }
 
