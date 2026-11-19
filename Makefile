@@ -98,13 +98,16 @@ test:
 device-qa:
 	@Tools/DeviceQA/device-qa.sh $(cmd)
 
-# 실기기 UI 테스트 (예: make uitest device='EunSeo iPhone') — 스킴 HilitUITests(Dev 계)
-# 시뮬레이터로 돌리려면 device='iPhone 16' 처럼 시뮬레이터 이름을 준다.
+# 실기기 UI 테스트 (예: make uitest device='EunSeo iPhone' [only=Issue160UITests]) — 스킴 HilitUITests(Dev 계)
+# only 는 클래스 또는 클래스/메서드. 생략하면 전부.
+# 시뮬레이터로 돌리려면 device='iPhone 16' 처럼 시뮬레이터 이름을 준다. 실기기는 기기 잠금을 잡는다(반납: make device-qa cmd=unlock).
 uitest:
 	@[ -n "$(device)" ] || (echo "❌ device 필수. 예: make uitest device='EunSeo iPhone' (목록: xcrun devicectl list devices)"; exit 1)
 	@if xcrun simctl list devices available | grep -qF "$(device) ("; then \
 		dest="platform=iOS Simulator,name=$(device)"; \
 	else \
+		DEVICE="$(device)" Tools/DeviceQA/device-qa.sh lock || exit 1; \
 		dest="platform=iOS,name=$(device)"; \
 	fi; \
-	xcodebuild -workspace Hilit.xcworkspace -scheme HilitUITests -destination "$$dest" -allowProvisioningUpdates test
+	only=""; [ -z "$(only)" ] || only="-only-testing:HilitUITests/$(only)"; \
+	xcodebuild -workspace Hilit.xcworkspace -scheme HilitUITests -destination "$$dest" -allowProvisioningUpdates $$only test
