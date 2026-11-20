@@ -37,8 +37,6 @@ let project = Project.makeModule(
                 "ITSAppUsesNonExemptEncryption": false,
                 "CFBundleIconName": "AppIcon"
             ]),
-            // 앱 아이콘 — feature(example:) 는 기본 리소스가 없어 명시 안 하면 아이콘 누락(업로드 90713·90022).
-            resources: ["Example/Resources/**"],
             dependencies: [
                 .composableArchitecture,
                 .core(interface: .network),       // live 하네스 — TokenStore(Keychain)·AuthTokens

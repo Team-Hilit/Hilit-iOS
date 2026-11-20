@@ -14,6 +14,7 @@ excluded:
   - "**/*.generated.swift"
   - "**/*.docc"           # DocC 튜토리얼 코드 스니펫(실제 소스 아님)
   - "**/Tests"            # 테스트 코드 — given/when/then 이 본질적으로 길어 프로덕션 길이 기준 미적용
+# ↑ glob 은 경로에 한글이 있으면 안 맞는다 — 빌드 페이즈는 같은 폴더를 find 로 직접 뺀다(TargetScript+SwiftLint.swift).
 
 disabled_rules:
   - orphaned_doc_comment  # @lat 라벨이 doc comment 와 선언 사이에 와서 충돌 → 의도적 비활성
