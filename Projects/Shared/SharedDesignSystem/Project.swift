@@ -6,7 +6,13 @@ import ProjectDescriptionHelpers
 let project = Project.makeModule(
     name: "SharedDesignSystem",
     targets: [
-        .shared(interface: "DesignSystem", factory: .init(resources: ["Interface/Resources/**"])),
+        // Interface 만 buildable folder 가 아니라 glob 이다 — 폰트를 폴더로 실으면 Tuist 가 폰트 접근자
+        // (…FontConvertible, Pretendard.swift 가 사용)를 합성하지 않고, 폴더 안에 glob 리소스를 섞을 수도 없다.
+        // → 이 타겟은 파일 추가 시 `make generate` 필요.
+        .shared(interface: "DesignSystem", factory: .init(
+            sources: ["Interface/**"],
+            resources: ["Interface/Resources/**"]
+        )),
         .shared(implements: "DesignSystem"),
         .shared(testing: "DesignSystem"),
         .shared(tests: "DesignSystem")

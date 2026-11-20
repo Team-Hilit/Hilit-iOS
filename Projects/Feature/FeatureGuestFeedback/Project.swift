@@ -22,8 +22,6 @@ let project = Project.makeModule(
             .project(target: "DomainGuestFeedbackTesting", path: .domain(.guestFeedback))
         ])),
         .feature(example: "GuestFeedback", factory: .init(
-            // TestFlight 배포 대상(G4 단독 검증) — AppIcon 에셋. 없으면 ASC 가 CFBundleIconName 누락으로 거부한다.
-            resources: ["Example/Resources/**"],
             dependencies: [
             .composableArchitecture,
             .domain(interface: .guestFeedback),

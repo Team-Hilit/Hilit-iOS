@@ -165,6 +165,9 @@ let project = Project.makeModule(
 `Project.swift`가 참조하는 소스 경로(`Interface/`, `Sources/`, `Testing/`, `Tests/`, `Example/`)에  
 Swift 파일이 하나 이상 있어야 Tuist가 타겟을 생성한다.
 
+각 경로는 **buildable folder**(Xcode 동기화 폴더)로 연결된다 — 이후 그 안의 파일 추가·삭제는 `tuist generate` 없이 반영된다.
+리소스도 같은 폴더째 실리므로 Example 앱 아이콘은 `Example/Resources/Assets.xcassets` 에 두기만 하면 된다(`resources:` 지정 불필요).
+
 ```
 Projects/Feature/FeatureInterviewSetup/   # Feature 는 Interface 없음 (D3)
 ├── Project.swift
