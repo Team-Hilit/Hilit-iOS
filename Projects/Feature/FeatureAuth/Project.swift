@@ -24,8 +24,6 @@ let project = Project.makeModule(
             .domain(interface: .consent)
         ])),
         .feature(example: "Auth", factory: .init(
-            // 앱 아이콘 — feature(example:) 는 기본 리소스가 없어 명시 안 하면 아이콘 누락(업로드 90713·90022).
-            resources: ["Example/Resources/**"],
             dependencies: [
                 .composableArchitecture,
                 .domain(interface: .auth),
