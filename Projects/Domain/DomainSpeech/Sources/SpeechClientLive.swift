@@ -30,7 +30,7 @@ extension SpeechClient: @retroactive DependencyKey {
 }
 
 /// 단일 AVAudioEngine 소유자 — start/stop 멱등. 실장치 의존이라 유닛 테스트 제외 — 실기기 로그 검증.
-/// 레벨·발화 판정은 tap 콜백(직렬)에서 SpeechActivityDetector 가 수행하고, 이벤트만 스트림으로 흘린다.
+/// 피크 레벨·발화 판정은 tap 콜백(직렬)에서 SpeechActivityDetector 가 수행하고, 이벤트만 스트림으로 흘린다.
 /// 같은 tap 이 파일 기록 2계열도 담당한다 — 세션 전구간(합성 입력)·답변 구간(STT 제출).
 actor AudioCaptureManager {
     private var engine: AVAudioEngine?
@@ -41,6 +41,8 @@ actor AudioCaptureManager {
     private var tapFormat: AVAudioFormat?
     private let sessionRecorder = TapFileRecorder()
     private let answerRecorder = TapFileRecorder()
+    /// 현재 엔진의 발화 감지기 — tap 클로저와 같은 인스턴스. 판정 게이트는 답변 구간이 연다.
+    private var detector: SpeechActivityDetector?
     /// 진단 탐침(HILIT_STT_PROBE) — 켜졌을 때만 붙는다. 제품 동작에 관여하지 않는다.
     private var transcriptionProbe: MicTranscriptionProbe?
 
@@ -85,6 +87,7 @@ actor AudioCaptureManager {
 
             self.engine = engine
             self.tapFormat = format
+            self.detector = detector
             self.continuation = continuation
             self.transcriptionProbe = probe
             // 소비자가 for-await 를 취소(effect 취소)해도 엔진이 남지 않게 정지를 건다.
@@ -128,10 +131,14 @@ actor AudioCaptureManager {
         guard let tapFormat else { return }   // 캡처 미가동 — 조용히 무시(서버 판정 위임)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("interview-answer.m4a")
         answerRecorder.begin(url: url, format: tapFormat)
+        // 발화 판정도 «답변 구간» 과 함께 연다 — AI 발화 중 스피커 에코가 사용자 발화로 잡히지 않고,
+        // 질문마다 판정 상태가 처음부터 시작한다(이 호출이 곧 answering 진입 신호다).
+        detector?.startListening()
     }
 
     func finishAnswerRecording() -> Data? {
-        answerRecorder.finishTakingData()
+        detector?.stopListening()
+        return answerRecorder.finishTakingData()
     }
 
     private func stopEngine() {
@@ -146,6 +153,7 @@ actor AudioCaptureManager {
         engine.stop()
         self.engine = nil
         self.tapFormat = nil
+        self.detector = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -154,52 +162,88 @@ actor AudioCaptureManager {
     }
 }
 
-/// 버퍼 → 레벨·발화 이벤트 변환기. tap 콜백은 직렬로 불려 상태 경쟁이 없다 (@unchecked 근거).
+/// 버퍼 → 레벨·발화 이벤트 변환기. 판정 기준은 dBFS 가 아니라 **진폭 비율**(풀스케일 1.0 대비 피크)이다.
+/// tap 콜백(오디오 스레드)과 `startListening`/`stopListening`(액터)이 만나므로 락으로 좁게 보호한다 (@unchecked 근거).
 /// 임계·주기 상수는 실기기 튜닝 여지 — [[interview#음성 캡처]].
 final class SpeechActivityDetector: @unchecked Sendable {
     /// 레벨 로그 주기.
     static let levelInterval: TimeInterval = 1.0
-    /// 발화 시작 임계 (dBFS) — 상향 돌파 시 speechStarted.
-    static let speechStartThreshold: Float = -35
-    /// 발화 종료 임계 (dBFS) — 미만이 speechEndHold 지속되면 speechEnded (히스테리시스).
-    static let speechEndThreshold: Float = -45
+    /// 발화 시작 임계 — 피크가 풀스케일의 8%(≈ −21.9 dBFS) 이상인 버퍼를 «시끄러운 구간» 으로 센다.
+    static let speechStartAmplitude: Float = 0.08
+    /// 발화 시작 확정에 필요한 «연속» 시끄러운 버퍼 수 — 중간에 한 버퍼라도 임계 미만이면 처음부터 센다.
+    static let speechStartConsecutiveBuffers = 2
+    /// 침묵 임계 — 피크가 풀스케일의 3%(≈ −30.5 dBFS) 미만이면 침묵이고, speechEndHold 지속되면 speechEnded (히스테리시스).
+    static let silenceAmplitude: Float = 0.03
     static let speechEndHold: TimeInterval = 1.0
-    /// 무음 바닥값 — log10(0) 방지 겸 dBFS 하한.
+    /// 무음 바닥값 — log10(0) 방지 겸 dBFS 하한 (level 로그 전용).
     static let silenceFloor: Float = -160
 
+    private let lock = NSLock()
+    /// 발화 판정 게이트 — 닫혀 있으면 speechStarted·speechEnded 를 내지 않는다(level 로그는 항상 흐른다).
+    /// 답변 구간(`startAnswerRecording` ~ `answerAudio`)에만 연다 — 질문 TTS 가 스피커로 나오는 동안
+    /// 마이크에 섞인 에코가 «사용자 발화» 로 잡히지 않게 하려는 것이다.
+    private var isListening = false
     private var isSpeaking = false
+    private var loudStreak = 0
     private var silenceElapsed: TimeInterval = 0
     private var windowElapsed: TimeInterval = 0
-    private var windowPeak: Float = -160
+    private var windowPeak: Float = 0
 
+    /// 발화 판정 시작 — 이전 판정 상태(발화 중·연속 카운트)를 비우고 처음부터 센다.
+    func startListening() {
+        lock.lock()
+        defer { lock.unlock() }
+        isListening = true
+        resetSpeechState()
+    }
+
+    /// 발화 판정 정지 — 멱등.
+    func stopListening() {
+        lock.lock()
+        defer { lock.unlock() }
+        isListening = false
+        resetSpeechState()
+    }
+
+    /// tap 버퍼 한 개 = 한 구간. 전 채널의 최대 절댓값이 그 구간의 피크다.
     func process(_ buffer: AVAudioPCMBuffer) -> [SpeechCaptureEvent] {
         guard let channelData = buffer.floatChannelData, buffer.frameLength > 0,
               buffer.format.sampleRate > 0
         else { return [] }
 
         let frameCount = Int(buffer.frameLength)
-        let samples = channelData[0]
-        var sumOfSquares: Float = 0
-        for index in 0..<frameCount {
-            let sample = samples[index]
-            sumOfSquares += sample * sample
+        var peak: Float = 0
+        for channel in 0..<Int(buffer.format.channelCount) {
+            let samples = channelData[channel]
+            for index in 0..<frameCount {
+                peak = max(peak, abs(samples[index]))
+            }
         }
-        let rms = (sumOfSquares / Float(frameCount)).squareRoot()
-        let decibels = max(20 * log10(max(rms, .leastNonzeroMagnitude)), Self.silenceFloor)
-        let bufferDuration = Double(frameCount) / buffer.format.sampleRate
+        return process(peak: peak, duration: Double(frameCount) / buffer.format.sampleRate)
+    }
 
+    /// 구간 하나의 피크(0…1)와 길이로 판정한다 — 버퍼 없이도 호출할 수 있어 유닛 테스트가 쓴다.
+    func process(peak: Float, duration: TimeInterval) -> [SpeechCaptureEvent] {
+        lock.lock()
+        defer { lock.unlock() }
         var events: [SpeechCaptureEvent] = []
 
-        // 발화 판정 — 시작은 즉시, 종료는 히스테리시스(임계 미만 1초 지속).
-        if !isSpeaking, decibels > Self.speechStartThreshold {
-            isSpeaking = true
-            silenceElapsed = 0
-            events.append(.speechStarted)
-        } else if isSpeaking {
-            if decibels < Self.speechEndThreshold {
-                silenceElapsed += bufferDuration
+        if isListening {
+            if !isSpeaking {
+                // 시작 — 시끄러운 구간이 «연속» 으로 이어져야 한다. 끊기면 카운트를 비운다.
+                loudStreak = peak >= Self.speechStartAmplitude ? loudStreak + 1 : 0
+                if loudStreak >= Self.speechStartConsecutiveBuffers {
+                    isSpeaking = true
+                    loudStreak = 0
+                    silenceElapsed = 0
+                    events.append(.speechStarted)
+                }
+            } else if peak < Self.silenceAmplitude {
+                // 종료 — 침묵 임계 미만이 speechEndHold 지속돼야 한다. 한 구간이라도 넘으면 처음부터 잰다.
+                silenceElapsed += duration
                 if silenceElapsed >= Self.speechEndHold {
                     isSpeaking = false
+                    silenceElapsed = 0
                     events.append(.speechEnded)
                 }
             } else {
@@ -207,16 +251,27 @@ final class SpeechActivityDetector: @unchecked Sendable {
             }
         }
 
-        // 레벨 로그 — 1초 윈도의 피크를 방출 (짧은 발화도 로그에 드러나게).
-        windowPeak = max(windowPeak, decibels)
-        windowElapsed += bufferDuration
+        // 레벨 로그 — 1초 윈도의 피크를 dBFS 로 방출 (짧은 발화도 로그에 드러나게, 임계와 같은 피크 기준).
+        windowPeak = max(windowPeak, peak)
+        windowElapsed += duration
         if windowElapsed >= Self.levelInterval {
-            events.append(.level(windowPeak))
+            events.append(.level(Self.decibels(fromAmplitude: windowPeak)))
             windowElapsed = 0
-            windowPeak = Self.silenceFloor
+            windowPeak = 0
         }
 
         return events
+    }
+
+    /// 진폭(0…1) → dBFS. 0 은 `silenceFloor` 로 받는다.
+    static func decibels(fromAmplitude amplitude: Float) -> Float {
+        max(20 * log10(max(amplitude, .leastNonzeroMagnitude)), silenceFloor)
+    }
+
+    private func resetSpeechState() {
+        isSpeaking = false
+        loudStreak = 0
+        silenceElapsed = 0
     }
 }
 
