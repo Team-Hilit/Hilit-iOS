@@ -28,8 +28,6 @@ let project = Project.makeModule(
         ])),
         // Example = 리포트 단독 데모. 서버 없이 fixture 를 주입해 화면 분기를 돌린다.
         .feature(example: "Report", factory: .init(
-            // 앱 아이콘 — feature(example:) 는 기본 리소스가 없어 명시 안 하면 아이콘 누락(업로드 90713·90022).
-            resources: ["Example/Resources/**"],
             dependencies: [
                 .composableArchitecture,
                 .domain(interface: .interviewReport),

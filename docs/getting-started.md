@@ -87,7 +87,7 @@ xcodebuild -workspace Hilit.xcworkspace -scheme Hilit-Dev \
 | 의존성/모듈을 못 찾음 | `tuist install` 다시 → `tuist generate`. 그래도면 `tuist clean` 후 재시도 |
 | 새 모듈을 추가했는데 빌드에 안 잡힘 | `Modules.swift` 등록 + 레이어 umbrella 에 Implementation 추가했는지 확인 → `tuist generate` 재실행 |
 | umbrella 를 고쳤는데 반영 안 됨 | 캐시된 그래프로 빌드된 것. **`tuist generate` 를 반드시 다시** 돌린다 |
-| 파일 추가했는데 Xcode 에 안 보임 | Tuist 는 글롭으로 소스를 잡음. `tuist generate` 다시 실행 |
+| 파일 추가했는데 Xcode 에 안 보임 | 모듈 폴더(`Sources/`·`Interface/` 등)는 buildable folder 라 자동 반영된다. 예외 — `SharedDesignSystem` 의 `Interface/`(폰트 접근자 때문에 글롭)·에셋 추가(Tuist 접근자 합성)는 `tuist generate` 다시 실행 |
 
 ---
 
