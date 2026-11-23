@@ -25,7 +25,8 @@ extension AppFeature {
     /// 잔존 정리를 **판정보다 먼저** 끝낸다 — 순서를 지키려 판정을 effect 안에서 잇지 않고
     /// 별도 액션(`firstLaunchResolved`)으로 갈라 놓는다. 미완 영상 업로드 재개(저널)는 그 순서에
     /// 얽히지 않아 나란히 건다 — 강제 종료·complete 실패 회복은 실행 시점 훅이 유일하다(스펙 ⑤).
-    /// 앱 사망 세션 정리도 마찬가지로 실행 시점 훅뿐이라 여기 나란히 건다.
+    /// 진행 중 보관값 검증도 실행 시점에 한 번 나란히 건다 — 앱이 죽었다 살아난 뒤 홈이 처음 그려질 때
+    /// 카드가 서버 판정(`resumeState`)을 거치게 하려는 것이다(예전엔 여기서 죽은 세션을 abandon 으로 닫았다).
     func startUpEffects() -> Effect<Action> {
         .merge(
             .run { send in
@@ -33,7 +34,7 @@ extension AppFeature {
                 await send(.firstLaunchResolved)
             },
             .run { [uploadQueue] _ in await uploadQueue.resumePending() },
-            cleanUpDeadHeldSession(),
+            validateHeldSession(),
             observeResolvedDeeplinks()
         )
     }
@@ -79,8 +80,10 @@ extension AppFeature {
             // 된다 — 확인과 삭제를 한 연산으로 묶고, 세그먼트 폐기도 그 뒤에 세운다.
             guard heldSessionStore.clearIfHolding(sessionId) else { return }
             // 세션이 끝났으니 재개 재료(세그먼트)도 폐기 — `.interrupted` 만이 세그먼트를 보존하는 유일한
-            // 이탈 경로다. purgeRecordings 는 원장이 그 세션을 아직 소유해 no-op 이라 discard 가 맞다(멱등·비던짐).
+            // 이탈 경로다. `discardRecording` 은 이 프로세스의 원장을, `purgeRecordings` 는 앱이 죽어 원장 없이
+            // 남은 세그먼트를 맡는다(둘 다 멱등·비던짐 — 원장을 먼저 비워야 purge 가 «현재 원장 세션» 으로 무시하지 않는다).
             await recordingClient.discardRecording()
+            await recordingClient.purgeRecordings(sessionId)
             await send(.interviewAbandonResolved)
         }
     }
@@ -93,6 +96,16 @@ extension AppFeature {
     /// 않아 확정할 «다음 턴» 이 없고, 사용자는 카메라 확인·가이드를 아직 보지 않았다.
     func resumeHeldSession(_ sessionId: Int) -> Effect<Action> {
         .run { [heldSessionStore, interviewClient, recordingClient] send in
+            // 서버가 끝낸 세션 — 보관값을 걷고(그 세션의 장부일 때만) 재개 재료를 버린 뒤 홈을 다시 태워 변형을
+            // 갱신한다(진행 중 → 처음·소진). 세그먼트는 `.interrupted` 만이 보존하는 재개 재료인데 세션이 끝났으니
+            // 폐기한다: `discardRecording` 은 이 프로세스의 원장을, `purgeRecordings` 는 앱이 죽어 원장 없이 남은
+            // 세그먼트를 맡는다(둘 다 멱등·비던짐 — 원장을 먼저 비워야 purge 가 «현재 원장 세션» 으로 무시하지 않는다).
+            func clearEndedSession() async {
+                guard heldSessionStore.clearIfHolding(sessionId) else { return }
+                await recordingClient.discardRecording()
+                await recordingClient.purgeRecordings(sessionId)
+                await send(.home(.view(.onAppear)))
+            }
             do {
                 let check = try await interviewClient.checkResume(sessionId)
                 // 대기 사이에 장부가 바뀌었을 수 있다(완주·중단이 지웠거나 새 세션이 저장됐거나) —
@@ -102,13 +115,7 @@ extension AppFeature {
                 // 안에서 이미 끝냈다. 클라가 할 일은 보관값 삭제뿐이다.
                 // TODO(#69): status == .invalid 는 Interview_SttFailure 화면 — 복귀 라우팅
                 //            ([[interview#코디네이터]])엔 배선됐고, 홈 탭 경로의 화면 전환만 미도안.
-                guard check.isResumable else {
-                    guard heldSessionStore.clearIfHolding(sessionId) else { return }
-                    // 세션이 끝났으니 재개 재료(세그먼트)도 폐기 — `.interrupted` 만이 세그먼트를 보존하는 유일한
-                    // 이탈 경로다. purgeRecordings 는 원장이 그 세션을 아직 소유해 no-op 이라 discard 가 맞다(멱등·비던짐).
-                    await recordingClient.discardRecording()
-                    return await send(.home(.view(.onAppear)))
-                }
+                guard check.isResumable else { return await clearEndedSession() }
                 // 시작 전 세션 — 살아 있다는 것만 확인하고 준비 화면으로 되돌린다.
                 if !held.hasStarted {
                     return await send(.interviewReadinessResumeResolved(sessionId: sessionId))
@@ -119,15 +126,15 @@ extension AppFeature {
                 // 두 번째 대기도 같은 이유로 다시 맞춘다 — 여기선 라우팅이 목적이라 읽기로 확인한다.
                 guard heldSessionStore.load(matching: sessionId) != nil else { return }
                 guard !resumed.sessionEnded, let question = resumed.nextQuestion else {
-                    guard heldSessionStore.clearIfHolding(sessionId) else { return }
-                    // 위와 같은 이유 — 끝난 세션의 세그먼트는 재개 재료가 아니다(discard 는 멱등·비던짐).
-                    await recordingClient.discardRecording()
-                    return await send(.home(.view(.onAppear)))
+                    return await clearEndedSession()
                 }
                 await send(.interviewResumeResolved(sessionId: sessionId, question: question))
             } catch {
+                // 서버가 «이어갈 수 없다» 고 확정한 실패(404 내 세션 아님 — 계정 전환 등 · 409 이미 끝남 · 프리로드 실패)는
+                // 끝난 세션과 같게 걷는다 — 안 걷으면 카드가 남아 탭해도 아무 일이 없는 유령이 된다(예전엔 킬 클린업이
+                // 404 를 걷었다). 네트워크가 죽은 것과 세션이 끝난 것은 다르므로 그 밖의 실패는 보관값을 지우지 않는다.
+                if HeldSessionVerdict.of(failure: error) == .clear { await clearEndedSession() }
                 // TODO: 재개 실패 안내 미도안(토스트 자리) — 화면을 유지하고 삼킨다.
-                // 네트워크가 죽은 것과 세션이 끝난 것은 다르므로 보관값은 지우지 않는다.
             }
         }
     }
@@ -182,53 +189,41 @@ extension AppFeature {
         draftStore.clear()
     }
 
-    // MARK: - 복귀 시점 보관값 검증
+    // MARK: - 보관값 서버 검증 (실행·복귀)
 
-    /// 포그라운드 복귀 — 홈에 남은 보관값이 그새 끝난 세션(hold 20분 만료 등)인지 확인하고, 끝났으면
+    /// 실행·포그라운드 복귀 — 로컬 보관값이 그새 끝난 세션(hold 20분 만료 등)인지 서버에 묻고, 끝났으면
     /// 카드를 걷는다(스펙 ③ «20분 초과 복귀 → 카드 없이 홈»). 이 판정이 면접 화면이 아니라 여기 있는 건,
     /// 동결 세션이 백그라운드 진입 즉시 홈으로 나오기 때문이다([[interview#코디네이터]] — 2026-08-09 개정).
-    /// 죽은 프로세스 보관값은 대상이 아니다 — 그건 실행 시점 킬 클린업 몫이라 술어를 정확히 반대로 쓴다.
-    /// 실패(오프라인)는 삼킨다: 보관값을 남겨 두고 다음 복귀나 카드 탭이 다시 묻는다.
+    ///
+    /// **재개 가능 여부는 서버가 정한다**(`resumeState` — 2026-11 개정, [[interview#Client 계약]]). 앱이 죽었다
+    /// 살아난 보관값도 대상이고, RESUMABLE 이면 **아무것도 하지 않는다** — 카드가 남고 [이어서 진행] 이 잇는다.
+    /// (예전엔 죽은 프로세스의 보관값을 여기서 `abandon(USER_EXIT)` 로 닫았다 — 세그먼트 원장이 프로세스 수명이라서였고,
+    /// 지금은 영상을 못 이어받는 재개가 영상 없이 진행하는 쪽으로 수렴한다.)
+    /// 404(내 세션이 아님 — 계정 전환 등)는 끝난 세션과 같게 걷는다 — 안 걷으면 카드가 영구 유령이 된다.
+    /// 그 밖의 실패(오프라인·미로그인)는 삼킨다: 보관값을 남겨 두고 다음 복귀나 카드 탭이 다시 묻는다.
+    /// 판정(`HeldSessionVerdict`)은 Interface 순수 함수가 맡고 여기선 효과만 싣는다 — App 테스트 타깃이 없다.
     func validateHeldSession() -> Effect<Action> {
         .run { [heldSessionStore, interviewClient, recordingClient] send in
-            guard let held = heldSessionStore.load(), held.isResumableInCurrentProcess else { return }
-            guard let check = try? await interviewClient.checkResume(held.sessionId), !check.isResumable
-            else { return }
+            guard let held = heldSessionStore.load() else { return }
+            // 판정은 순수 함수(`HeldSessionVerdict`)가 내린다 — RESUMABLE·판정 불가(오프라인·미로그인)는 남기고,
+            // ENDED 와 «이어갈 수 없다» 고 확정된 실패(404 등)만 걷는다.
+            let verdict: HeldSessionVerdict
+            do {
+                verdict = .of(try await interviewClient.checkResume(held.sessionId))
+            } catch {
+                verdict = .of(failure: error)
+            }
+            guard verdict == .clear else { return }
             // 물어본 그 세션의 장부가 아직 그대로일 때만 걷는다 — 대기 사이에 새 세션이 저장됐으면
             // 여기서 지우는 것이 그 새 장부이고, 버리는 세그먼트도 그쪽 것이다(#130 이 만든 고아와 같은 꼴).
-            // 끝난 세션이니 재개 재료(세그먼트)도 폐기한다 — 홈 두 갈래의 ENDED 처리와 같은 규약이다.
+            // 끝난 세션이니 재개 재료(세그먼트)도 폐기한다 — 홈 두 갈래의 ENDED 처리와 같은 규약이다:
+            // `discardRecording` 은 이 프로세스의 원장을, `purgeRecordings` 는 앱이 죽어 원장 없이 남은 세그먼트를 맡는다.
             // 환불은 서버가 그 GET 안에서 끝냈다. INVALID 도 여기선 카드를 걷는 것까지다 —
             // 띄울 면접 흐름이 없어 STT 실패 화면은 홈 [이어서 진행] 경로에 남는다(#69 TODO).
             guard heldSessionStore.clearIfHolding(held.sessionId) else { return }
             await recordingClient.discardRecording()
+            await recordingClient.purgeRecordings(held.sessionId)
             await send(.home(.view(.onAppear)))
-        }
-    }
-
-    // MARK: - 앱 사망 세션 정리
-
-    /// 앱 사망 세션 정리(스펙 ④) — 죽은 프로세스의 진행분 보관값을 서버에 USER_EXIT 로 닫고 로컬을 걷는다.
-    /// 실패(오프라인·미로그인 401 등)는 보관값 유지 — 다음 실행이 재시도하고, 그동안 홈 카드는
-    /// 프로세스 토큰 필터가 막는다(스펙 ⑤). 홈 렌더와 레이스해도 같은 이유로 무해하다.
-    func cleanUpDeadHeldSession() -> Effect<Action> {
-        .run { [heldSessionStore, interviewClient, recordingClient] _ in
-            guard let sessionId = HeldSessionCleanup.target(heldSessionStore.load()) else { return }
-            do {
-                let check = try await interviewClient.checkResume(sessionId)
-                if HeldSessionCleanup.followup(check) == .abandonUserExit {
-                    _ = try await interviewClient.abandonSession(sessionId, .userExit)
-                }
-            } catch InterviewError.sessionAlreadyEnded {
-                // 이미 중단 완료(409) — 목적 달성으로 간주([처음부터 시작] 과 같은 규약).
-            } catch InterviewError.sessionNotFound {
-                // 내 세션이 아니다(계정 전환 등 404) — 서버에 닫을 것이 없으니 로컬만 걷는다.
-            } catch {
-                return
-            }
-            // 정리를 시작한 그 장부일 때만 걷는다 — 서버 왕복 사이에 사용자가 새 면접을 시작했으면
-            // (온보딩 완주가 장부를 연다) 여기서 지우는 것이 살아 있는 세션의 장부다.
-            guard heldSessionStore.clearIfHolding(sessionId) else { return }
-            await recordingClient.purgeRecordings(sessionId)
         }
     }
 

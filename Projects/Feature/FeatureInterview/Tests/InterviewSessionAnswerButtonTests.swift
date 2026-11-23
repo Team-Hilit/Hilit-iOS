@@ -96,10 +96,10 @@ struct InterviewSessionAnswerButtonTests {
         let store = TestStore(initialState: initialState) {
             InterviewSessionFeature()
         } withDependencies: {
-            $0.ignoreHeldSessionStamp()
+            $0.ignoreHeldSessionSave()
             $0.continuousClock = TestClock()
             $0.recordingClient.startPreview = { nil }
-            $0.recordingClient.startRecording = { _ in 0 }
+            $0.recordingClient.startRecording = { _, _ in 0 }
             $0.speechClient.startCapture = {
                 AsyncStream {
                     $0.yield(.speechStarted)
@@ -124,10 +124,10 @@ struct InterviewSessionAnswerButtonTests {
         let store = TestStore(initialState: .fixture()) {
             InterviewSessionFeature()
         } withDependencies: {
-            $0.ignoreHeldSessionStamp()
+            $0.ignoreHeldSessionSave()
             $0.continuousClock = TestClock()
             $0.recordingClient.startPreview = { nil }
-            $0.recordingClient.startRecording = { _ in 0 }
+            $0.recordingClient.startRecording = { _, _ in 0 }
             $0.speechClient.startCapture = {
                 AsyncStream {
                     $0.yield(.captureFailed("권한 거부"))

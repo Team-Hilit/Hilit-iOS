@@ -129,13 +129,8 @@ struct InterviewFeatureTests {
     @Test("면접 시작 전환은 요약 질문·프리뷰 핸들을 세션에 시드하고 장부를 «시작됨» 으로 올린다")
     func startRequestedSeedsSummaryQuestionAndPreviewHandle() async {
         let handle = CameraPreviewHandle(session: AVCaptureSession())
-        // 온보딩 완주가 이미 열어 둔 장부 — 시작 전이라 hasStarted false, 표식은 찍혀 있다.
-        let opened = HeldSession(
-            sessionId: 1,
-            recordedSeconds: 0,
-            hasStarted: false,
-            processToken: HeldSession.currentProcessToken
-        )
+        // 온보딩 완주가 이미 열어 둔 장부 — 시작 전이라 hasStarted false 다.
+        let opened = HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: false)
         let held = LockIsolated<HeldSession?>(opened)
         var readiness = InterviewReadinessFeature.State(sessionId: 1)
         readiness.previewHandle = handle
@@ -156,13 +151,8 @@ struct InterviewFeatureTests {
                 previewHandle: handle
             ))
         }
-        // 플래그만 오른다 — 표식·누적초는 장부에 있던 값 그대로다(덮어쓰면 회수 판정이 흔들린다).
-        #expect(held.value == HeldSession(
-            sessionId: 1,
-            recordedSeconds: 0,
-            hasStarted: true,
-            processToken: HeldSession.currentProcessToken
-        ))
+        // 플래그만 오른다 — 누적초는 장부에 있던 값 그대로다(덮어쓰면 재개 시계 시드가 흔들린다).
+        #expect(held.value == HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: true))
     }
 
     @Test("장부가 비어 있으면 시작 전환이 새로 연다 — 시작한 세션이 장부 밖에 남으면 회수 불가다")

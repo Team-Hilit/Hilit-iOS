@@ -40,6 +40,16 @@ struct SegmentLedger: Equatable {
         segments.append(segment)
     }
 
+    /// 재개 지점(`seconds` — held 가 기억하는 진행 길이)을 이 원장이 이어받을 수 있는가 — 그 세션을 들고 있고
+    /// 누적초가 맞을 때만이다. 앱이 죽으면 원장(메모리)이 비어 여기서 걸린다: 모른 채 `begin` 하면 인덱스 0
+    /// 경로를 받아 남은 첫 세그먼트를 지우고, 시계는 0 으로 돌아가 서버 마킹과 어긋난다(스펙 ⑤).
+    /// held 는 반올림 정수초, 원장은 에셋 실측이라 반올림 오차(0.5)보다 넉넉한 허용치를 둔다.
+    func canContinue(sessionId: Int, fromSeconds seconds: Int) -> Bool {
+        self.sessionId == sessionId && abs(cumulativeSeconds - Double(seconds)) <= Self.resumeTolerance
+    }
+
+    static let resumeTolerance = 1.5
+
     mutating func reset() {
         sessionId = nil
         segments = []

@@ -53,6 +53,7 @@ extension InterviewSessionFeature {
         state.toast = nil
         let sessionId = state.sessionId
         let hasRecording = state.hasRecording
+        let elapsedSeconds = state.elapsedSeconds
         return .merge(
             .cancel(id: CancelID.clock),      // raw 축도 함께 정지 — 녹화가 없는 시간은 영상 타임라인이 아니다
             .cancel(id: CancelID.toast),
@@ -71,14 +72,13 @@ extension InterviewSessionFeature {
                     audio.map { RecordingAudioSegment(fileURL: $0.fileURL, startedAtHostSeconds: $0.startedAtHostSeconds) }
                 )
                 await speechClient.stopCapture()
-                // held 갱신 — #69 «녹화하며 갱신» 미배선이 여기서 해소된다. 토큰은 «이 프로세스가
-                // 세그먼트를 들고 있다» 는 표식(스펙 ⑤). 녹화가 없던 세션은 0초 보관값을 건드리지 않는다.
-                if hasRecording, let cumulative {
-                    heldSessionStore.save(HeldSession(
-                        sessionId: sessionId,
-                        recordedSeconds: Int(cumulative.rounded()),
-                        processToken: HeldSession.currentProcessToken
-                    ))
+                // held 갱신 — #69 «녹화하며 갱신» 미배선이 여기서 해소된다. 진행 길이는 녹화가 있으면 세그먼트
+                // 누적초, 없으면(영상 없이 진행 중이던 세션 — 앱이 죽었다 살아난 재개 포함) 세션 시계 raw 축이다.
+                // 영상 없는 세션의 길이를 안 남기면 다음 재개의 시계 시드가 옛 값이라 8분·12분 상한이 리셋된다.
+                // 녹화가 있는데 마감이 실패해 누적초가 없으면(nil) 갱신하지 않는다 — 옛 값이 원장과 맞는 쪽이다.
+                let recordedSeconds = hasRecording ? cumulative.map { Int($0.rounded()) } : elapsedSeconds
+                if let recordedSeconds {
+                    heldSessionStore.save(HeldSession(sessionId: sessionId, recordedSeconds: recordedSeconds))
                 }
                 // 이탈 통보는 **맨 끝**이다(2026-08-09) — 이걸 받은 코디네이터·AppFeature 가 cover 를 닫고,
                 // 그 dismiss 가 이 effect 를 취소한다. 위로 올리면 세그먼트 마감·held 갱신이 중간에 잘린다.

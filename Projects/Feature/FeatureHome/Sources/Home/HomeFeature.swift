@@ -330,14 +330,14 @@ private extension HomeFeature {
     /// (2026-08-21 엔 «뒤로가기로 나간 시작 전 세션도 카드로 남겨 이용권을 되찾게» 했으나, 이용권은 세션 생성이
     /// 아니라 리포트 생성 시에만 차감돼 그 전제가 틀렸다.)
     ///
-    /// 필터는 `isResumableInCurrentProcess` 하나 — 클린업이 이 술어의 **정확한 부정**을 쓴다
-    /// ([[interview#Client 계약]]). 시작 전 장부는 0초·표식 없음이라 여기서 참이고(잃을 영상이 없어
-    /// 프로세스를 넘어 살아남는다), 그래서 클린업도 건드리지 않는다 — 두 곳이 자동으로 맞물린다.
+    /// **보관값이 있으면 카드다 — 프로세스를 가리지 않는다.** 재개 가능 여부는 서버가 정한다: 실행·복귀 때의
+    /// `validateHeldSession` 과 카드 탭의 `checkResume` 이 ENDED 로 판정하면 보관값을 걷어 카드가 사라진다
+    /// ([[interview#Client 계약]]). 앱이 죽었다 살아나도 UserDefaults 의 `sessionId` 가 남아 카드가 이어진다.
     static func startVariant(
         heldSession: HeldSession?,
         remainingChances: Int?
     ) -> StartInterviewFeature.Variant {
-        if let heldSession, heldSession.isResumableInCurrentProcess {
+        if let heldSession {
             return .inProgress(
                 remainingQuestionCount: remainingQuestionCount(recordedSeconds: heldSession.recordedSeconds)
             )

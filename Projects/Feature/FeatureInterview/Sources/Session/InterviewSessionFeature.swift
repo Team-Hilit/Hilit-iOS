@@ -95,6 +95,10 @@ public struct InterviewSessionFeature {
         /// READY 폴링이 동봉한 요약 질문 — 첫 asking 재생(base64 mp3)에 쓴다.
         /// 재개 진입은 질문 준비 폴링 없이 confirmResume 의 질문으로 시작해 요약 질문 자체가 없다(nil) — 첫 재생부터 스트림이다.
         public let summaryQuestion: SummaryQuestion?
+        /// 재개 진입이면 그때 시드한 진행 길이(초), 처음 시작이면 nil — `startRecording` 에 «이어받을 지점» 으로 실린다.
+        /// 원장이 그 지점을 이어받지 못하면(앱이 죽어 세그먼트가 사라짐) 녹화는 시작 실패로 떨어지고
+        /// 면접은 영상 없이 잇는다 — 서버가 재개 가능이라 한 판정을 영상이 뒤집지 않는다([[interview#Client 계약]]).
+        public let resumeAtSeconds: Int?
 
         public var phase: Phase = .asking
         /// 세션 경과 시간(초) — **영상 타임라인 축**(0점 = 녹화 시작). 시간 마킹은 전부 이 값이다.
@@ -180,6 +184,7 @@ public struct InterviewSessionFeature {
         ) {
             self.sessionId = sessionId
             self.summaryQuestion = summaryQuestion
+            self.resumeAtSeconds = nil
             self.previewHandle = previewHandle
             self.currentQuestion = ActiveQuestion(summaryQuestion)
         }
@@ -193,6 +198,7 @@ public struct InterviewSessionFeature {
         ) {
             self.sessionId = sessionId
             self.summaryQuestion = nil
+            self.resumeAtSeconds = resume.approximateElapsedSeconds
             self.previewHandle = previewHandle
             self.currentQuestion = ActiveQuestion(resume.question)
             self.elapsedSeconds = resume.approximateElapsedSeconds
@@ -337,14 +343,16 @@ extension InterviewSessionFeature {
             guard !state.hasStarted else { return .none }
             state.hasStarted = true
             let sessionId = state.sessionId
+            let resumeAtSeconds = state.resumeAtSeconds
             // 프리뷰 확보 → 녹화 시작 순서를 한 effect 로 잇는다 — 준비 화면이 프리뷰를 못 열고 넘어온 경우
             // (장치 실패 등 — 시작 게이트는 프리뷰를 보지 않는다)엔 프리뷰가 아직 없어서 병렬이면 startRecording 이
             // «프리뷰 세션 없음» 으로 죽는다. startPreview 는 멱등이라 핸들이 있으면 즉시 반환된다.
             // 타임라인 정렬(스펙 §①): 녹화 시작 완료 → 세션 시계 시드 → 첫 질문. 시계·재생은 recordingStarted 가 연다.
+            // 재개면 이어받을 지점을 싣는다 — 앱이 죽어 원장이 사라졌으면 던져서(아래 catch) 영상 없이 진행한다.
             return .run { send in
                 await send(.inner(.previewStarted(recordingClient.startPreview())))
                 do {
-                    let cumulative = try await recordingClient.startRecording(sessionId)
+                    let cumulative = try await recordingClient.startRecording(sessionId, resumeAtSeconds)
                     await send(.inner(.recordingStarted(success: true, cumulativeSeconds: cumulative)))
                 } catch {
                     Self.recordingLogger.error("녹화 시작 실패: \(String(describing: error))")
@@ -561,6 +569,8 @@ extension InterviewSessionFeature {
     /// 녹화 시작 종료 — 이 순간이 타임라인 기준점이다(스펙 §①). 시계·세션 오디오·질문 재생을 한꺼번에 연다.
     /// 재개(세그먼트 보유)면 반환된 누적초(에셋 실측)가 raw 시드를 확정한다 — 근사값(held)을 덮는다.
     /// 시작 실패(success == false)는 시드를 지킨 채 진행한다 — 영상 없는 리포트로 수렴(스펙 §⑥).
+    /// 앱이 죽었다 살아난 재개도 여기다: 서버가 RESUMABLE 이라 면접은 잇지만 세그먼트 원장이 사라져
+    /// `startRecording` 이 이어받기를 거절한다([[interview#Client 계약]]).
     private func reduceRecordingStarted(
         _ state: inout State, success: Bool, cumulativeSeconds: Double
     ) -> Effect<Action> {
@@ -572,16 +582,12 @@ extension InterviewSessionFeature {
             state.isExitAvailable = true   // 시드가 경계를 넘긴 재개 — 등호 tick 이 다시 오지 않는다
         }
         state.questionAudioStartedAt = state.elapsedSeconds
-        // «이 프로세스에서 면접이 시작됐다» 를 여기서 못 박는다(2026-08-09) — 이 표식이 없으면 앱이
-        // 백그라운드를 **거치지 않고** 죽었을 때(크래시·메모리 압박·동결 완주 전 강제 종료) 보관값이
-        // 시작 탭 시점의 «0초·토큰 없음» 그대로 남아 갓 시작한 보관분과 구분되지 않고, 킬 클린업이
-        // 대상으로 잡지 못해 서버 세션이 영영 살아남는다([[interview#Client 계약]]).
-        // 녹화 실패(success == false)여도 찍는다 — 표식의 뜻은 «세그먼트 보유» 가 아니라 «면접 시작» 이고,
-        // 음성만으로 진행한 세션도 답변이 서버에 쌓여 정리 대상이다.
+        // 진행 길이를 최신으로 맞춘다 — 녹화 시작 성공이면 에셋 실측 누적초(위에서 시계에 반영), 실패(영상 없이 진행)면
+        // 시드 그대로다. 실패에 `cumulativeSeconds`(0)를 쓰면 재개로 들어온 세션의 보관값이 0초로 덮여, 다음 재개의
+        // 시계 시드가 0 이 되고 8분·12분 상한이 리셋된다. 이 값이 다음 재개의 `startRecording` 이어받을 지점이다.
         heldSessionStore.save(HeldSession(
             sessionId: state.sessionId,
-            recordedSeconds: Int(cumulativeSeconds.rounded()),
-            processToken: HeldSession.currentProcessToken
+            recordedSeconds: state.elapsedSeconds
         ))
         return .merge(
             .run { send in
