@@ -18,13 +18,17 @@ import Testing
 // 기다렸다 닫으면 그 왕복 동안 면접 화면이 보인다), 복귀 체크는 **준비 화면 전용**으로 남는다.
 @MainActor
 struct InterviewFeatureResumeRoutingTests {
+    /// 재개 시드 — 홈이 confirmResume 으로 받아 코디네이터에 실어 주는 것과 같은 모양.
+    static let resumeSeed = InterviewResumeSeed(
+        question: NextQuestion(questionId: 21, isLast: false, turn: TurnInfo(turnLevel: 2, depthLevel: 0)),
+        approximateElapsedSeconds: 60
+    )
+
     /// 동결된(= 백그라운드로 얼린) 세션 — 이탈 통보를 올리기 직전의 상태.
+    /// 재개 진입은 준비 화면부터 열려서(`State(sessionId:resume:)`), 시작 탭을 거친 뒤의 세션 화면을 직접 세운다.
     private static func frozenSessionState() -> InterviewFeature.State {
-        var state = InterviewFeature.State(sessionId: 1, resume: .init(
-            question: NextQuestion(questionId: 21, isLast: false, turn: TurnInfo(turnLevel: 2, depthLevel: 0)),
-            approximateElapsedSeconds: 60
-        ))
-        guard case .session(var session) = state.screen else { return state }
+        var state = InterviewFeature.State(sessionId: 1, resume: resumeSeed)
+        var session = InterviewSessionFeature.State(sessionId: 1, resume: resumeSeed)
         session.isInterrupted = true
         state.screen = .session(session)
         return state

@@ -256,8 +256,8 @@ struct InterviewSessionBackgroundTests {
     }
 }
 
-// 재개 시드(스펙 ③④) — 동결의 반대쪽 반. readiness 를 생략하고 confirmResume 의 최신 질문·누적초로
-// 세션에 직행할 때, 시계 이어가기·질문 출처(스트림)·해금 보완·시작 실패 폴백을 고정한다.
+// 재개 시드(스펙 ③④) — 동결의 반대쪽 반. 준비 화면의 시작 탭이 confirmResume 의 최신 질문·누적초로
+// 세션을 열 때, 시계 이어가기·질문 출처(스트림)·해금 보완·시작 실패 폴백을 고정한다.
 @MainActor
 struct InterviewSessionResumeSeedTests {
     /// 재개 진입 시드 — 최신 턴 질문(confirmResume)과 표시용 근사 누적초(held).
