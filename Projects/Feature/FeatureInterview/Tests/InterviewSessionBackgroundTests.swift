@@ -372,7 +372,7 @@ struct InterviewSessionResumeSeedTests {
         store.dependencies.interviewClient.questionAudioStream = { stubAudioStream($0, $1) }
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
-        // 녹화 실패여도 캡처 구독(micCaptureLogging)은 돈다 — startSessionAudioRecording 만 꺼진다(미스텁이 감시).
+        // 녹화 실패여도 캡처 구독(observeMicCapture)은 돈다 — startSessionAudioRecording 만 꺼진다(미스텁이 감시).
         store.dependencies.speechClient.startCapture = { AsyncStream { $0.finish() } }
 
         await store.send(.view(.onAppear))

@@ -136,17 +136,25 @@ public struct InterviewSessionView: View {
                 }
                 .buttonStyle(.mini(.filled))
             }
-            // answering 이 아닐 땐 감추되 **자리는 지킨다** — 빼면 위 «면접 종료하기» 와 상태 칩이
-            // 턴마다 46(=34+12) 내려앉는다. 해금 전에도, 버튼이 사라지는 카운트다운에도 이 칸이
-            // 밴드 높이(34)를 잡는다 — 시안의 카운트다운 토스트도 그만큼 내려와 있다(671 vs 해금 625).
+            // answering 이 아니거나 아직 발화가 감지되지 않았을 땐 감추되 **자리는 지킨다** — 빼면 위
+            // «면접 종료하기» 와 상태 칩이 턴마다 46(=34+12) 내려앉는다. 해금 전에도, 버튼이 사라지는
+            // 카운트다운에도 이 칸이 밴드 높이(34)를 잡는다 — 시안의 카운트다운 토스트도 그만큼 내려와
+            // 있다(671 vs 해금 625).
             Button("답변 완료하기") {
                 send(.userTappedAnswerComplete)
             }
             .buttonStyle(.mini(.green))
-            .opacity(store.phase == .answering ? 1 : 0)
-            .disabled(store.phase != .answering)
+            .opacity(isAnswerCompleteVisible ? 1 : 0)
+            .disabled(!isAnswerCompleteVisible)
+            .animation(.easeInOut(duration: 0.3), value: isAnswerCompleteVisible)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    /// «답변 완료하기» 노출 — 답변 중이면서 발화가 감지됐을 때(마이크가 죽었으면 상시, `canCompleteAnswer`).
+    /// 질문 TTS 가 끝나도 바로 나오지 않는다 — 사용자가 말하기 시작해야 나타난다.
+    private var isAnswerCompleteVisible: Bool {
+        store.phase == .answering && store.canCompleteAnswer
     }
 
     // MARK: - 마무리·종료 확인·이탈 경고 모달 (DS LoadingModal/Modal + .hilitModal)
@@ -226,9 +234,18 @@ private func sessionPreview(
     sessionPreview { $0.elapsedSeconds = 1 }
 }
 
+/// 질문 TTS 직후 — 사용자가 말하기 전이라 «답변 완료하기» 가 숨겨지고 자리만 지킨다.
+#Preview("답변 대기 — 발화 감지 전") {
+    sessionPreview {
+        $0.phase = .answering
+        $0.elapsedSeconds = 78
+    }
+}
+
 #Preview("답변 녹음 중") {
     sessionPreview {
         $0.phase = .answering
+        $0.hasDetectedSpeech = true
         $0.elapsedSeconds = 80
     }
 }
@@ -243,6 +260,7 @@ private func sessionPreview(
 #Preview("8분 — 종료 해금(버튼 2개)") {
     sessionPreview {
         $0.phase = .answering
+        $0.hasDetectedSpeech = true
         $0.elapsedSeconds = 480
         $0.isExitAvailable = true
         $0.toast = .exitUnlocked
@@ -270,6 +288,7 @@ private func sessionPreview(
 #Preview("종료 확인 모달") {
     sessionPreview {
         $0.phase = .answering
+        $0.hasDetectedSpeech = true
         $0.elapsedSeconds = 480
         $0.isExitAvailable = true
         $0.isExitConfirmPresented = true
@@ -279,6 +298,7 @@ private func sessionPreview(
 #Preview("중도 이탈 경고 — 8분 전") {
     sessionPreview {
         $0.phase = .answering
+        $0.hasDetectedSpeech = true
         $0.elapsedSeconds = 200
         $0.isEarlyExitWarningPresented = true
     }

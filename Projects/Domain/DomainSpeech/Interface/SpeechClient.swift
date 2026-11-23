@@ -21,13 +21,15 @@ public enum PlaybackEvent: Equatable, Sendable {
     case failed(String)
 }
 
-/// 마이크 캡처 이벤트 — 검증 로그·추후 침묵 판정(PRD §3.6)의 씨앗.
+/// 마이크 캡처 이벤트 — 답변 완료 버튼 노출 판정·검증 로그·추후 침묵 판정(PRD §3.6)의 씨앗.
+/// 발화 판정 기준은 dBFS 가 아니라 **진폭 비율**(풀스케일 대비 피크)이다 — dBFS 는 로그 비교용 환산값.
 public enum SpeechCaptureEvent: Equatable, Sendable {
-    /// 입력 레벨 dBFS(−160…0) — 1초 주기. 마이크 생존 확인용.
+    /// 입력 피크 dBFS(−160…0) — 1초 윈도 최댓값, 1초 주기. 마이크 생존 확인 + 임계(0.08≈−21.9, 0.03≈−30.5) 튜닝용.
     case level(Float)
-    /// 레벨이 발화 임계를 상향 돌파.
+    /// 답변 구간 중 입력 피크가 풀스케일의 8%(≈ −21.9 dBFS) 이상인 tap 버퍼가 **연속 2번** 감지됐다.
+    /// 답변 구간 밖(질문 TTS 재생 중 등)에는 나오지 않는다 — `startAnswerRecording` 참조.
     case speechStarted
-    /// 발화 중 레벨이 종료 임계 미만으로 1초 지속.
+    /// 발화 중 피크가 풀스케일의 3%(≈ −30.5 dBFS) 미만으로 1초 지속.
     case speechEnded
     /// 엔진 시작 실패(권한 거부·세션 구성 실패 등) — 방출 후 스트림이 종료된다.
     case captureFailed(String)
@@ -65,9 +67,12 @@ public struct SpeechClient: Sendable {
     /// zero-fill 로 타임라인을 보존한다(스킵 금지 — 립싱크 정렬 파괴). 세션 기록기에만 적용.
     public var setSessionAudioMuted: @Sendable (Bool) async -> Void
     /// 답변 구간 m4a 기록 시작 — 세션 화면이 답변 시작(질문 재생 완료 → answering 진입) 시 호출.
-    /// 캡처 미가동이면 조용히 무시된다(제출은 nil 로 서버 판정 위임, 스펙 §②).
+    /// **발화 감지(`speechStarted`/`speechEnded`)도 이 시점에 열린다** — AI 발화 중 스피커 에코가 사용자
+    /// 발화로 잡히지 않게, 그리고 질문마다 판정을 처음부터 세게 하려는 것이다. `answerAudio` 가 닫는다.
+    /// 캡처 미가동이면 조용히 무시된다(제출은 nil 로 서버 판정 위임, 스펙 §②) — 발화 감지도 열리지 않는다.
     public var startAnswerRecording: @Sendable () async -> Void
     /// 답변 구간 기록을 닫고 m4a(AAC) Data 를 반환 — 반환 후 파일 즉시 삭제. 기록 없음·실패는 nil.
+    /// 발화 감지도 여기서 닫힌다.
     public var answerAudio: @Sendable () async -> Data?
     /// 재생 정지(멱등) — 흐름 이탈·실패 전환에서 코디네이터가 캡처와 함께 부른다.
     /// 정상 종료(홈 전환)는 부르지 않는다 — 마무리 멘트 재생을 살리기 위해.
