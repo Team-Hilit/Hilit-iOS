@@ -585,10 +585,7 @@ extension InterviewSessionFeature {
         // 진행 길이를 최신으로 맞춘다 — 녹화 시작 성공이면 에셋 실측 누적초(위에서 시계에 반영), 실패(영상 없이 진행)면
         // 시드 그대로다. 실패에 `cumulativeSeconds`(0)를 쓰면 재개로 들어온 세션의 보관값이 0초로 덮여, 다음 재개의
         // 시계 시드가 0 이 되고 8분·12분 상한이 리셋된다. 이 값이 다음 재개의 `startRecording` 이어받을 지점이다.
-        heldSessionStore.save(HeldSession(
-            sessionId: state.sessionId,
-            recordedSeconds: state.elapsedSeconds
-        ))
+        saveProgress(state)
         return .merge(
             .run { send in
                 for await _ in clock.timer(interval: Self.clockTick) {
@@ -601,6 +598,13 @@ extension InterviewSessionFeature {
             observeMicCapture(startsSessionAudio: success),
             playCurrentQuestion(state)
         )
+    }
+
+    /// 진행 길이(세션 시계 raw 축)를 보관값에 남긴다 — 다음 재개의 시계 시드다. 녹화 시작과 턴 경계(제출 응답)가 쓰고,
+    /// 백그라운드 동결은 세그먼트 실측으로 따로 맞춘다(`freezeAndLeave`). 세션 화면이 살아 있는 동안만 불리므로
+    /// 장부를 새로 만들어도 고아가 아니다 — 시작한 세션은 장부에 있어야 회수된다.
+    private func saveProgress(_ state: State) {
+        heldSessionStore.save(HeldSession(sessionId: state.sessionId, recordedSeconds: state.elapsedSeconds))
     }
 
     /// 세션 시계 1초 진행 — 8:00 해금, 상한 10초 전 최종 카운트다운, 상한 도달 시 HARD_CAP 제출.
@@ -669,6 +673,12 @@ extension InterviewSessionFeature {
         if let next = result.nextQuestion {
             state.currentQuestion = ActiveQuestion(next)
             state.hasRetriedPlayback = false
+            // 턴 경계 — 진행 길이를 장부에 남긴다. 서버는 진행을 제출로만 알고(주기 저장·하트비트 API 가 없다) 재개는
+            // «최신 턴 질문» 을 처음부터 다시 받으니, 시계도 이 지점에서 이어지는 게 콘텐츠와 맞다. 녹화 시작·동결 때만
+            // 남기면 포그라운드에서 죽은 세션이 옛 값(새 세션이면 0초)으로 재개돼 8분 해금·12분 상한·8:45 마무리
+            // 판정(`isWrapUp` — 서버가 자체 판정하지 않는다)이 리셋된다. 12:00 도달 직후의 응답이어도 남긴다 —
+            // 아래 HARD_CAP 제출이 실패해도 재개 시계가 상한을 안다.
+            saveProgress(state)
             if state.hardCapReachedWhileSubmitting {
                 // 비행 중 상한 도달 — 새 질문을 여는 대신 즉시 HARD_CAP 으로 마감한다.
                 state.phase = .processingAnswer

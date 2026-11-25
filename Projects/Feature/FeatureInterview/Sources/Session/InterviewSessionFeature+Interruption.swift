@@ -75,7 +75,9 @@ extension InterviewSessionFeature {
                 // held 갱신 — #69 «녹화하며 갱신» 미배선이 여기서 해소된다. 진행 길이는 녹화가 있으면 세그먼트
                 // 누적초, 없으면(영상 없이 진행 중이던 세션 — 앱이 죽었다 살아난 재개 포함) 세션 시계 raw 축이다.
                 // 영상 없는 세션의 길이를 안 남기면 다음 재개의 시계 시드가 옛 값이라 8분·12분 상한이 리셋된다.
-                // 녹화가 있는데 마감이 실패해 누적초가 없으면(nil) 갱신하지 않는다 — 옛 값이 원장과 맞는 쪽이다.
+                // 녹화가 있는데 마감이 실패해 누적초가 없으면(nil) 갱신하지 않는다 — 마감 실패는 세그먼트 유실이라 영상이
+                // 이미 깨진 경로이고, 남는 값(녹화 시작 때의 실측 또는 턴 경계의 시계 값)이 원장과 `canContinue`
+                // 허용치 밖이면 그 재개는 영상 없이 진행한다.
                 let recordedSeconds = hasRecording ? cumulative.map { Int($0.rounded()) } : elapsedSeconds
                 if let recordedSeconds {
                     heldSessionStore.save(HeldSession(sessionId: sessionId, recordedSeconds: recordedSeconds))

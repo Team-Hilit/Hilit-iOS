@@ -18,7 +18,7 @@ import Foundation
 // InterviewSessionFeatureTests.swift · InterviewSessionNetworkFailureTests.swift.
 
 extension DependencyValues {
-    /// 세션 시작(`recordingStarted`)이 보관값에 진행 길이를 저장하는 실배선을 삼킨다.
+    /// 세션 시작(`recordingStarted`)·턴 경계(다음 질문 응답)가 보관값에 진행 길이를 저장하는 실배선을 삼킨다.
     /// 진행 길이 **자체**를 검증하는 테스트는 이걸 쓰지 않고 `save` 를 직접 잡는다.
     mutating func ignoreHeldSessionSave() {
         heldSessionStore.save = { _ in }

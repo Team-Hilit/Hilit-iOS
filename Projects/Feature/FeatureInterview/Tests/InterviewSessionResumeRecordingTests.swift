@@ -81,4 +81,53 @@ struct InterviewSessionResumeRecordingTests {
         await store.finish()
         #expect(saved.value == HeldSession(sessionId: state.sessionId, recordedSeconds: 75))
     }
+
+    // 서버는 진행을 답변 제출로만 안다(주기 저장·하트비트 API 가 없다) — 재개는 «최신 턴 질문» 을 처음부터 다시 준다.
+    // 녹화 시작·동결 때만 남기면 포그라운드에서 죽은 세션이 옛 값(새 세션이면 0초)으로 재개돼 8분 해금·12분 상한·
+    // 8:45 마무리 판정(`isWrapUp` 은 클라 타이머 기준)이 리셋된다. 그래서 다음 질문이 열리는 턴 경계마다 남긴다.
+    @Test("다음 질문 응답은 그 시점의 시계 raw 축을 진행 길이로 남긴다 — 포그라운드에서 죽어도 재개 시계가 턴 경계에서 이어진다")
+    func nextQuestionSavesProgressAtTurnBoundary() async {
+        var state = InterviewSessionFeature.State.fixture(hasStarted: true)
+        state.phase = .processingAnswer
+        state.isSubmitting = true
+        state.elapsedSeconds = 135
+        let saved = LockIsolated<HeldSession?>(nil)
+        let store = TestStore(initialState: state) {
+            InterviewSessionFeature()
+        } withDependencies: {
+            $0.heldSessionStore.save = { saved.setValue($0) }
+            $0.interviewClient.questionAudioStream = stubAudioStream
+            $0.speechClient.playStream = { _, _ in finishedPlayback() }
+            $0.speechClient.setSessionAudioMuted = { _ in }
+            $0.speechClient.startAnswerRecording = {}
+        }
+
+        await store.send(.inner(.answerSubmitted(.next(13)))) {
+            $0.isSubmitting = false
+            $0.phase = .asking
+            $0.currentQuestion = InterviewSessionFeature.ActiveQuestion(questionId: 13, turnLevel: 1, isLast: false)
+            $0.questionAudioStartedAt = 135
+        }
+        await store.receive(\.inner.questionPlaybackFinished) {
+            $0.phase = .answering
+            $0.questionAudioEndedAt = 135
+            $0.answerStartedAt = 135
+        }
+        #expect(saved.value == HeldSession(sessionId: state.sessionId, recordedSeconds: 135))
+    }
+
+    @Test("종료 응답은 진행 길이를 남기지 않는다 — 끝난 세션의 장부를 되살리지 않는다")
+    func endedAnswerDoesNotSaveProgress() async {
+        var state = InterviewSessionFeature.State.fixture(hasStarted: true)
+        state.phase = .processingAnswer
+        state.isSubmitting = true
+        state.elapsedSeconds = 135
+        // heldSessionStore 미스텁 — 저장을 시도하면 unimplemented 가 잡는다.
+        let store = TestStore(initialState: state) { InterviewSessionFeature() }
+
+        await store.send(.inner(.answerSubmitted(.ended(.backExit)))) {
+            $0.isSubmitting = false
+        }
+        await store.receive(\.delegate.aborted)
+    }
 }

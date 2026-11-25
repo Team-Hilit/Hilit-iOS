@@ -17,7 +17,8 @@ import Foundation
 /// 앱이 죽었다 살아나도 UserDefaults 에 남은 `sessionId` 로 다시 묻고, RESUMABLE 이면 이어간다([[interview#Client 계약]]).
 public struct HeldSession: Codable, Equatable, Sendable {
     public var sessionId: Int
-    /// 지금까지 면접이 진행된 타임라인 길이(초) — 녹화가 있으면 세그먼트 누적, 없으면 세션 시계의 raw 축.
+    /// 지금까지 면접이 진행된 타임라인 길이(초) — 동결 마감이 쟀으면 세그먼트 누적초, 그 외(녹화 시작·턴 경계 저장,
+    /// 영상 없이 진행)엔 세션 시계의 raw 축.
     /// 재개 시 시계 시드이자 남은 질문 수 표기의 재료 — 최대 면접 길이 8분에서 뺀
     /// 잔여 시간으로 rule-base 환산하는 계산은 Feature 몫이고, 여기엔 저장만 한다.
     public var recordedSeconds: Int
@@ -68,8 +69,8 @@ public extension HeldSession {
 // 진행 중 세션의 로컬 영속 seam (UserDefaults, 외부 IO = Domain 레이어 규칙). 서버 무관이고
 // 한 번에 한 세션만 보관한다 — 이용권 예약이 세션 하나를 잡는 구조라 동시 진행이 없다.
 // 수명: **온보딩 완주(= 서버에 세션이 생긴 순간)** 에 `hasStarted false` 로 연다(2026-08-21) →
-// [시작하기] 탭에서 `hasStarted true` → 세션 화면이 녹화를 열 때와 백그라운드 마감(세그먼트 경계)마다
-// 진행 길이로 갱신 → 면접 완료 시 삭제.
+// [시작하기] 탭에서 `hasStarted true` → 세션 화면이 녹화를 열 때·다음 질문이 열리는 턴 경계(제출 응답)·
+// 백그라운드 마감(세그먼트 경계)마다 진행 길이로 갱신 → 면접 완료 시 삭제.
 // 중단(abandon)·재개 불가(ENDED) 판정도 끝난 세션이라 같이 삭제한다. **시작 전에 버려진 세션도 삭제한다** —
 // 준비 화면 뒤로가기·질문 준비 실패(2026-11-07, Android 와 동일). 서버엔 알리지 않는다: 시작 전 세션을
 // 닫는 호출이 계약에 없고, USER_EXIT 는 리포트 생성(= 이용권 차감)을 트리거하는 «면접 중 이탈» 전용이다.
