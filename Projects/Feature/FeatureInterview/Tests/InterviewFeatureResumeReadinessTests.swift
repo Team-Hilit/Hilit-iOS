@@ -99,6 +99,17 @@ struct InterviewFeatureResumeReadinessTests {
         #expect(calls.value == ["suspend", "stopPreview", "stopCapture"])
     }
 
+    @Test("나가는 중(isClosing)에 도착한 시작 탭은 무시한다 — 장치를 놓는 동안 세션이 열려 cover 가 안 닫히는 것을 막는다")
+    func startRequestedWhileClosingIsIgnored() async {
+        var initialState = InterviewFeature.State(sessionId: 5, resume: Self.seed)
+        initialState.isClosing = true
+        // 의존성 미스텁 — 가드가 뚫려 세션이 열리면 화면 전환이 state 불일치로 잡히고, 장부를 건드려도 unimplemented 가 잡는다.
+        let store = TestStore(initialState: initialState) { InterviewFeature() }
+
+        await store.send(.screen(.readiness(.delegate(.startRequested))))   // 상태 무변화·effect 없음
+        await store.finish()
+    }
+
     // MARK: - 준비 화면
 
     @Test("재개 진입은 질문 준비 폴링 없이 guide2 에서 시작 게이트가 열린다 — 질문은 confirmResume 이 이미 줬다")
