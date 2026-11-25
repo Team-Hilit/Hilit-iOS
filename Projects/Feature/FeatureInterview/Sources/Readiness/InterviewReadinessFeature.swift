@@ -22,6 +22,8 @@ import DomainRecordingInterface
 /// 시작 버튼 탭은 delegate(.startRequested) 로만 올린다 — 세션 화면 전환은 코디네이터 몫.
 /// 시작 게이트는 «guide2 + 권한 + 질문 준비 READY» 삼중 — 하나라도 미충족이면 시작 버튼 비활성
 /// (질문 준비 중 로딩 연출은 «협의 가능», 임시 비활성만).
+/// 재개 진입(`State.isResume`)도 이 화면을 거친다 — 이탈 사이 사용자가 권한을 껐을 수 있어서다. 질문은 홈의
+/// `confirmResume` 이 이미 줬으니 질문 준비 폴링·게이트만 뺀 «guide2 + 권한» 이중 게이트가 된다.
 @Reducer
 public struct InterviewReadinessFeature {
     /// phase 최소 유지 시간 — aligning 은 «최소 유지 + 프리뷰 해소» 이중 게이트(둘 다 충족 시 진행),
@@ -57,6 +59,9 @@ public struct InterviewReadinessFeature {
 
         /// 폴링 대상 세션 — 온보딩 분석 스텝이 만든 세션의 id. AppFeature 배선(작업 D) 전까지 Example 이 주입.
         public let sessionId: Int
+        /// 재개 진입 — 이미 시작했던 세션을 이어서 연다. 질문은 `confirmResume` 이 줬고(코디네이터가 시드로 쥔다)
+        /// 요약 질문은 없으니, 질문 준비 폴링을 걸지 않고 게이트도 «준비됨» 으로 본다.
+        public let isResume: Bool
 
         public var phase: Phase = .aligning
         /// onAppear 재진입 가드 — phase 타이머·권한 요청 effect 중복 실행 방지.
@@ -74,13 +79,16 @@ public struct InterviewReadinessFeature {
         @Presents public var alert: AlertState<Action.Alert>?
 
         /// 시작 게이트 판정용 — READY 페이로드 유무만 본다(질문 자체는 코디네이터가 세션에 시드).
+        /// 재개 진입은 질문이 이미 있어 항상 true — 이 게이트를 서버 상태에 물리지 않는다.
         public var isQuestionPrepReady: Bool {
+            if isResume { return true }
             if case .ready = questionPrep { return true }
             return false
         }
 
-        public init(sessionId: Int) {
+        public init(sessionId: Int, isResume: Bool = false) {
             self.sessionId = sessionId
+            self.isResume = isResume
         }
     }
 
@@ -152,7 +160,8 @@ public struct InterviewReadinessFeature {
                 state.hasStarted = true
                 return .merge(
                     requestPermissionsAndStartPreview(),
-                    pollQuestionPrep(sessionId: state.sessionId),
+                    // 재개는 질문이 이미 있다 — 준비 상태를 물을 이유가 없고, 시작 게이트도 이 폴링에 걸리지 않는다.
+                    state.isResume ? .none : pollQuestionPrep(sessionId: state.sessionId),
                     scheduleAdvance(after: Self.aligningHold)
                 )
 

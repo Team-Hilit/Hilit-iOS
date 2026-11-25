@@ -64,7 +64,7 @@ Session --delegate(.aborted)-----------------▶ 코디네이터 --delegate(.clo
 | **JDClient** (DomainJD) | JD 링크 크롤링·정제·**서버 캐싱** (S1은 캐싱만 — 분석은 세션 생성 시, PRD §3.1) | `validate(url)→JDValidation` — reason: `CRAWLING_FAILED`·`CONTENT_TOO_SHORT`·`EXTRACTION_FAILED` | S1 | ✅ |
 | **PortfolioClient** (DomainPortfolio) | PDF 등록(202)·상태 폴링·목록(재설치 복구)·삭제 | `register(PortfolioUpload)→PortfolioProcessing` · `status(id)` · `list()→[Portfolio]` · `delete(id)` | S2·설정 | ✅ |
 | **InterviewClient** (DomainInterview) | 세션 생성(= S0~S3 **일괄 수집** + 연관성 검사, PRD §3.8 — 직군·연차는 프로필 스냅샷)·준비 폴링·답변 제출(턴 루프)·질문 오디오·레포트 목록 | `createSession(InterviewConfig)→202` · `sessionStatus(id)` · `submitAnswer` · `questionAudioStream` · `reportList()→[InterviewReportSummary]` | S3.5/S4·Part2·마이페이지 | ✅ 신스펙 정합(2026-08-02) |
-| **SpeechClient** (DomainSpeech) | 음성 입출력 | `startCapture()→AsyncStream<SpeechCaptureEvent>` · `stopCapture()` · `play(Data)` / `playStream(url:headers:)→AsyncStream<PlaybackEvent>` · `startSessionAudioRecording()`/`finishSessionAudioRecording()→SessionAudioRecording?` · `startAnswerRecording()`/`answerAudio()→Data?` · `stopPlayback()` — 예정: `transcribe()` (STT 30% 판정은 서버 `STT_RESET` 로 이관 — confidence 집계 폐기) | Part2 | 마이크 캡처 ✅ · 서버 TTS 재생 ✅(2026-08-02) · 세션·답변 m4a 실녹음 ✅(2026-08-05, 작업B 슬라이스1) · 발화 감지 기반 게이팅·STT 는 작업B 슬라이스a 예정 |
+| **SpeechClient** (DomainSpeech) | 음성 입출력 | `startCapture()→AsyncStream<SpeechCaptureEvent>` · `stopCapture()` · `play(Data)` / `playStream(url:headers:)→AsyncStream<PlaybackEvent>` · `startSessionAudioRecording()`/`finishSessionAudioRecording()→SessionAudioRecording?` · `startAnswerRecording()`/`answerAudio()→Data?` · `stopPlayback()` — 예정: `transcribe()` (STT 30% 판정은 서버 `STT_RESET` 로 이관 — confidence 집계 폐기) | Part2 | 마이크 캡처 ✅ · 서버 TTS 재생 ✅(2026-08-02) · 세션·답변 m4a 실녹음 ✅(2026-08-05, 작업B 슬라이스1) · 발화 감지 기반 «답변 완료하기» 게이팅 ✅(2026-11-19, 진폭 비율) · STT 는 작업B 슬라이스a 예정 |
 | **PermissionClient** (DomainPermission) | 카메라·마이크 권한 — **iOS 는 사용 시점 요청**(PRD §8, 심사 리젝 방지) + 설정 유도 | `status(MediaPermission)` · `request(MediaPermission)→Bool` · `openSettings()` | 준비 화면(P0) | ✅ |
 | **RecordingClient** (DomainRecording) | 전면 카메라 프리뷰 + 비디오 전용 캡처·백그라운드 경계마다 세그먼트 분할·정지 시 세션 오디오 사후 합성(A안-2, 30일 보존) | `startPreview()→CameraPreviewHandle?` · `stopPreview()` · `startRecording(sessionId)→Double`(이전까지 누적 녹화초) · `suspendRecording(RecordingAudioSegment?)→Double?`(현 세그먼트 마감, 반환은 누적초) · `stopRecording(finalAudio:)→RecordingRef`(전 세그먼트 합성) · `discardRecording()` · `purgeRecordings(sessionId:)`(킬 클린업 전용) | P0·P1·P4 | 프리뷰 ✅ · 녹화·합성 ✅(2026-08-05, 작업B 슬라이스1) · 세그먼트 분할·재개 ✅(2026-08-09, 면접 재개) |
 | **ScoringClient** | 세션 제출·보고서 → [ai-interview-report](ai-interview-report.md) | `submit(session)` · `report(id)→Report` | P4·Part3 | 예정 |
@@ -170,7 +170,7 @@ S1~S3 입력을 로컬 draft 로 자동 저장 — **앱 진짜 종료(kill/크�
 ```swift
 enum Phase {
     case asking            // 질문 TTS 재생 — 칩 «질문 듣는 중»
-    case answering         // 답변 녹음 — 칩 «답변 녹음 중» + «답변 완료하기»
+    case answering         // 답변 녹음 — 칩 «답변 녹음 중» + «답변 완료하기»(발화 감지 후 노출)
     case processingAnswer  // 답변 확정 직후 — 칩 «답변을 정리하고 있어요» (되돌리지 않는다)
     case finalCountdown    // 11:50~ 빨간 «N초» 초읽기 — 상태 칩 없음
 }
@@ -194,7 +194,7 @@ enum Phase {
 - **5초 생각**: 카운트다운, 먼저 말하면(STT partial 수신) 즉시 `answering` 점프.
 - **STT**: `transcribe()` partial마다 `lastSpeechAt` 갱신 + `silence` 타이머 리셋.
 - **종료 판정**: 발화 후 **10초 침묵** → 답변 확정(`processingAnswer`). ~~무발화 15초 → "질문 다시?"~~ 는 **PRD v3 로 소멸** — 무응답 재질의는 서버 몫이고 5회 재질의 종료 규칙은 §3.4(화면·멘트 미확정, §10). 사용자가 «답변 완료하기» 를 누르면 침묵 판정을 기다리지 않고 그 즉시 확정한다 ✅.
-- **답변 완료 버튼 게이팅**(발화 시작 후에만 노출)·**필러/마무리 멘트**는 STT partial 신호 의존 — 작업 B.
+- **답변 완료 버튼 게이팅**(발화 시작 후에만 노출)은 STT 가 아니라 **마이크 진폭 감지**로 구현했다 ✅(2026-11-19 — 피크 8% 이상 연속 2버퍼, 상세 [[interview#음성 캡처]]·[[interview#세션]]). **필러/마무리 멘트**는 STT partial 신호 의존 — 작업 B.
 
 ### (d) 세션 무결성 — P2 중단 = 이탈 신호(기록은 서버 보존)
 `scenePhase` + `AVAudioSession` interruption(전화·백그라운드·네트워크) 구독 → 모든 CancelID cancel + `.delegate(.aborted)`. (논의 N: 전화 차단 기술적 불가하면 이 경로 확정.)
@@ -218,7 +218,7 @@ enum Phase {
 - ✅ **종료 경로**(§3.7·§3.8) 8분 전 중도 이탈 경고 → 동결·`interrupted`(2026-08-09 — 세션 유지, 재개 가능) / 8분 후·상한·마치기 → 업로드 큐 접수 후 `finished`(2026-08-06: 리포트 대기 화면 소멸, 홈 직행). 확정 문구는 부록 C
 - ✅ **실녹화·업로드(작업B 슬라이스1)** — 2026-08-05: 비디오 전용 캡처 + 세션 오디오 사후 합성(A안-2) · `answerAudio` 실구현(m4a) · 조용한 업로드. 스펙 [2026-08-04-interview-recording-upload-design](../superpowers/specs/2026-08-04-interview-recording-upload-design.md) (§④·§⑤ 는 아래 개편이 대체)
 - ✅ **이탈·백그라운드 업로드 개편** — 2026-08-06: 종료 즉시 홈 직행 · `InterviewVideoUploadQueue`(저널 + background URLSession, 앱 재실행 재개·72h 폐기) · 네트워크 실패는 세션 오버레이(재개 가능). 스펙 [2026-08-06-interview-exit-background-upload-design](../superpowers/specs/2026-08-06-interview-exit-background-upload-design.md), 상세 [[interview#업로드 큐]]·[[interview#세션]](lat.md/interview.md)
-- 🔴 **Speech/Recording 배선(작업B 슬라이스a)** — 발화 감지 기반 «답변 완료하기» 게이팅 · 침묵 10초 확정 · 사고 5초 카운트다운 · 필러 멘트(PRD 수치 확정 후 별도 스펙). 질문 TTS·마무리 멘트 재생은 ✅(2026-08-02)
+- 🔴 **Speech/Recording 배선(작업B 슬라이스a)** — 침묵 10초 확정 · 사고 5초 카운트다운 · 필러 멘트(PRD 수치 확정 후 별도 스펙). 질문 TTS·마무리 멘트 재생은 ✅(2026-08-02)
 - ✅ **서버 턴 루프(작업 C)** — 2026-08-02: `submitAnswer` 실배선(2초 mock 소멸) · 응답 endType 5종 분기 · 랩업 8:45 `isWrapUp` · 503 백오프(1s·3s×2) · 종료 경로 제출 경유(MANUAL_END/HARD_CAP/BACK_EXIT — 구 EARLY_EXIT, 2026-08-03 서버 개명) · Example 실서버 하네스(`HILIT_ACCESS_TOKEN`). 스펙 [2026-08-02-interview-api-design](../superpowers/specs/2026-08-02-interview-api-design.md)
 - ✅ **AppFeature 배선(작업 D)** — 2026-08-03: 온보딩 `finished(sessionId)` → 면접 fullScreenCover, 종료 두 신호(`finished`/`closed`)가 cover 를 닫고 홈 재조회 · 면접 중 전역 LoadingModal 억제. 스펙 [2026-08-03-interview-exit-to-home-design](../superpowers/specs/2026-08-03-interview-exit-to-home-design.md). 잔여: 홈 «면접 시작» 직접 진입(이용권 게이트 — home-account §4 미결 6-1)
 - 🟡 **범위 제외** — 8:00 이후 잔여 시간 인디케이터(디자인 미확정) · 5회 재질의 종료(§3.4 — PRD §10 미확정)
@@ -258,7 +258,8 @@ v3 로 **닫힌** 논의(초안 미결 → 해소): 재시도/멱등성(전면 �
    AppFeature 배선 ✅ (2026-08-03, 작업 D) — 온보딩 완주 → 면접 fullScreenCover → 종료 시 홈 복귀(재조회) 왕복 성립, 면접 커버 중 전역 LoadingModal 억제.
    실녹화·업로드 ✅ (2026-08-05, 작업B 슬라이스1) — `RecordingClient.startRecording`/`stopRecording`(합성)·`answerAudio` 실구현·조용한 업로드. 상세 [[interview#프리뷰]]·[[interview#음성 캡처]](lat.md/interview.md)
    이탈·백그라운드 업로드 개편 ✅ (2026-08-06) — 정상 종료는 리포트 대기 화면 없이 홈 직행, 산출물은 `InterviewVideoUploadQueue`(저널+background URLSession)가 앱 수명과 무관하게 완주시킨다. 네트워크 실패는 세션 오버레이로 재개 가능. 상세 [[interview#업로드 큐]]·[[interview#실패]](lat.md/interview.md)
-   잔여 🔴: 발화 감지·침묵 10초·사고 5초·필러 멘트(작업B 슬라이스a). 상세 [[interview#면접 흐름]](lat.md/interview.md)
+   발화 감지 기반 «답변 완료하기» 게이팅 ✅ (2026-11-19) — 진폭 비율(피크 8%·3%) 판정, 답변 구간에만 열림. 상세 [[interview#음성 캡처]]·[[interview#세션]](lat.md/interview.md)
+   잔여 🔴: 침묵 10초·사고 5초·필러 멘트(작업B 슬라이스a). 상세 [[interview#면접 흐름]](lat.md/interview.md)
 5. **PortfolioFeature**(설정 관리) — `list`/`delete` 재사용
 6. **AppFeature 배선** ✅ Onboarding delegate(.finished(sessionId)/.dismiss) 수신 + 면접 fullScreenCover. 홈 «면접 시작» 직접 진입은 이용권 게이트 미결(home-account §4)
 7. **InterviewReportFeature** stub → Part 3 본격화
