@@ -93,7 +93,7 @@ public struct InterviewSessionFeature {
         /// 답변 제출·질문 스트림의 경로 파라미터 — 준비 화면과 같은 세션이다.
         public let sessionId: Int
         /// READY 폴링이 동봉한 요약 질문 — 첫 asking 재생(base64 mp3)에 쓴다.
-        /// 재개 진입은 readiness 를 건너뛰어 요약 질문 자체가 없다(nil) — 첫 재생부터 스트림이다.
+        /// 재개 진입은 질문 준비 폴링 없이 confirmResume 의 질문으로 시작해 요약 질문 자체가 없다(nil) — 첫 재생부터 스트림이다.
         public let summaryQuestion: SummaryQuestion?
 
         public var phase: Phase = .asking
@@ -337,9 +337,9 @@ extension InterviewSessionFeature {
             guard !state.hasStarted else { return .none }
             state.hasStarted = true
             let sessionId = state.sessionId
-            // 프리뷰 확보 → 녹화 시작 순서를 한 effect 로 잇는다 — 재개 직행(readiness 생략)은 프리뷰가
-            // 아직 없어서 병렬이면 startRecording 이 «프리뷰 세션 없음» 으로 죽는다. startPreview 는
-            // 멱등이라 일반 진입(핸들 보유)에선 즉시 반환된다.
+            // 프리뷰 확보 → 녹화 시작 순서를 한 effect 로 잇는다 — 준비 화면이 프리뷰를 못 열고 넘어온 경우
+            // (장치 실패 등 — 시작 게이트는 프리뷰를 보지 않는다)엔 프리뷰가 아직 없어서 병렬이면 startRecording 이
+            // «프리뷰 세션 없음» 으로 죽는다. startPreview 는 멱등이라 핸들이 있으면 즉시 반환된다.
             // 타임라인 정렬(스펙 §①): 녹화 시작 완료 → 세션 시계 시드 → 첫 질문. 시계·재생은 recordingStarted 가 연다.
             return .run { send in
                 await send(.inner(.previewStarted(recordingClient.startPreview())))

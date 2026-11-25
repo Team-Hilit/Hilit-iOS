@@ -50,20 +50,26 @@ public struct InterviewFeature {
         public var screen: Screen.State
         /// 온보딩 분석이 만든 세션 id — 흐름 내내 같은 세션을 쓴다.
         public let sessionId: Int
+        /// 재개 진입 시드 — 있으면 «이어서 진행» 이다. 준비 화면의 시작 탭이 이 시드로 세션을 연다.
+        /// 이 값이 «재개냐» 의 단일 근거다 — 시작 전환·뒤로가기 분기가 모두 여기를 본다.
+        public let resumeSeed: InterviewResumeSeed?
         /// 종료 신호 first-wins — 정상 종료엔 갈아탈 화면이 없어 finished 후에도 screen 이 .session 에 머문다.
         /// 늦은 두 번째 finished/aborted 를 case 가드만으로 거를 수 없어, 이 플래그가 이중 통보·재접수를 막는다.
         public var isClosing = false
 
         public init(sessionId: Int) {
             self.sessionId = sessionId
+            self.resumeSeed = nil
             self.screen = .readiness(InterviewReadinessFeature.State(sessionId: sessionId))
         }
 
-        /// 재개 진입(스펙 «결정 요약») — readiness 를 생략하고 세션으로 직행한다. 질문 준비 폴링이
-        /// 필요 없고(confirmResume 이 이미 질문을 줬다), 카메라는 세션 onAppear 의 startPreview 가 연다.
+        /// 재개 진입 — **준비 화면을 거친다**(2026-11-23 개정). 이탈 사이 사용자가 카메라·마이크 권한을 껐을 수 있고,
+        /// 세션으로 직행하면 그대로 녹화가 열려 영상·음성이 비어 버린다. 준비 화면이 권한을 다시 확인하고,
+        /// «면접 시작하기» 탭이 이 시드로 세션을 연다. 질문 준비 폴링은 건너뛴다(confirmResume 이 이미 질문을 줬다).
         public init(sessionId: Int, resume: InterviewResumeSeed) {
             self.sessionId = sessionId
-            self.screen = .session(InterviewSessionFeature.State(sessionId: sessionId, resume: resume))
+            self.resumeSeed = resume
+            self.screen = .readiness(InterviewReadinessFeature.State(sessionId: sessionId, isResume: true))
         }
     }
 
@@ -88,7 +94,8 @@ public struct InterviewFeature {
             case finished
             /// 면접 흐름 이탈(중단 폐기·실패 화면 X) — dismiss 는 AppFeature 몫.
             case closed
-            /// 백그라운드 동결 — cover 닫기·held 보존·홈 재조회는 AppFeature 몫(스펙 ③④).
+            /// 재개 재료(세그먼트·held)를 남기고 나가는 이탈 — 백그라운드 동결, 그리고 재개 준비 화면의 뒤로가기.
+            /// cover 닫기·held 보존·홈 재조회는 AppFeature 몫(스펙 ③④).
             /// 복귀 판정을 기다리지 않는다: 기다리면 복귀 후 면접 화면이 잠깐 보인다(2026-08-09 개정).
             case interrupted
         }
@@ -111,18 +118,28 @@ public struct InterviewFeature {
         Reduce { state, action in
             switch action {
             case .screen(.readiness(.delegate(.startRequested))):
+                guard case let .readiness(readiness) = state.screen else { return .none }
+                // 재개 — 질문·누적초는 홈이 `confirmResume` 으로 받아 둔 시드다. 장부는 이미 «시작됨» 이고 누적초도
+                // 들고 있어 건드리지 않는다(통째로 다시 쓰면 회수 판정 재료가 흔들린다) — 표식은 세션이 녹화를 열 때 찍는다.
+                // 핸들은 일반 진입과 같은 이유로 시드한다(첫 프레임부터 프리뷰가 붙는다).
+                if let seed = state.resumeSeed {
+                    state.screen = .session(InterviewSessionFeature.State(
+                        sessionId: state.sessionId,
+                        resume: seed,
+                        previewHandle: readiness.previewHandle
+                    ))
+                    return .none
+                }
                 // 준비 화면의 READY 페이로드(요약 질문)와 프리뷰 핸들을 세션 상태로 시드 —
                 // 요약 질문은 첫 턴 재생(작업 C), 핸들은 비동기 재요청을 기다리는 동안
                 // placeholder 로 떨어지는 깜빡임 방지. 재요청(onAppear)은 백스톱으로 유지된다.
-                guard case let .readiness(readiness) = state.screen,
-                      case let .ready(summaryQuestion) = readiness.questionPrep
-                else { return .none }
+                guard case let .ready(summaryQuestion) = readiness.questionPrep else { return .none }
                 // 장부는 이미 온보딩 완주 때 열렸다(2026-08-21) — 여기서 하는 일은 **«시작했다» 로
                 // 올리는 것**뿐이다. 이 플래그가 [이어서 진행] 의 목적지(시작 전이면 준비 화면, 시작 후면 세션)를 가른다.
                 // 표식은 세션 화면이 녹화를 열 때 찍고, 누적초는 백그라운드 마감마다 갱신한다
                 // ([[interview#세션]] 동결 경로).
                 //
-                // 장부가 없으면(비정상 — 재개 진입은 준비 화면을 건너뛴다) 새로 연다: 시작한 세션이
+                // 장부가 없으면(비정상) 새로 연다: 시작한 세션이
                 // 장부에 없는 채로 두면 회수도 재개도 못 하는 고아가 된다.
                 var held = heldSessionStore.load() ?? HeldSession(sessionId: state.sessionId, recordedSeconds: 0)
                 held.hasStarted = true
@@ -135,6 +152,14 @@ public struct InterviewFeature {
                 return .none
 
             case .screen(.readiness(.delegate(.backRequested))):
+                // 재개 준비 화면의 뒤로가기 = «잠시 나가기» — 세션이 서버에 살아 있고 장부·세그먼트가 재개 재료다.
+                // 아래 폐기 경로(장부 삭제 + `discardRecording()` 이 세그먼트 원장까지 비운다)를 타면 이어 볼 영상이
+                // 사라지고 홈 카드도 꺼진다. 장치만 놓고 홈으로 — 카드가 남아 다시 [이어서 진행] 할 수 있다.
+                if state.resumeSeed != nil {
+                    guard !state.isClosing else { return .none }
+                    state.isClosing = true
+                    return leaveForResumeAtHome()
+                }
                 // 준비 화면 뒤로가기 = 흐름 이탈이자 **세션 폐기**(Android 와 동일, 2026-11-07) — 장부를
                 // 지워 홈이 «진행 중» 카드를 그리지 않게 하고, 장치만 정리하고 나간다.
                 //
@@ -256,8 +281,8 @@ public struct InterviewFeature {
         }
     }
 
-    /// 동결 세션의 홈 경유 이탈 — 세그먼트는 **남긴다**(재개 재료). `discardRecording()` 을 부르지 않는
-    /// 유일한 이탈 경로다. 대신 장치는 놓는다: 안 놓으면 홈에서도 카메라가 살아 «계속 보고 있다» 가 된다.
+    /// 홈 경유 이탈(동결 세션 · 재개 준비 화면 뒤로가기) — 세그먼트는 **남긴다**(재개 재료). `discardRecording()` 을
+    /// 부르지 않는 유일한 이탈 경로다. 대신 장치는 놓는다: 안 놓으면 홈에서도 카메라가 살아 «계속 보고 있다» 가 된다.
     /// 통보가 맨 끝인 건 상위 dismiss 가 이 effect 를 취소하기 때문(`stopCaptureDevicesThenNotifyClosed` 와 같은 이유).
     private func leaveForResumeAtHome() -> Effect<Action> {
         .run { send in

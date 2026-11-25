@@ -142,7 +142,8 @@ extension AppFeature {
         return .none
     }
 
-    /// 재개 진입(스펙 ④) — readiness 생략, confirmResume 의 최신 질문 + 표시용 근사초 시드.
+    /// 재개 진입(스펙 ④) — confirmResume 의 최신 질문 + 표시용 근사초 시드. 면접 화면은 **준비 화면부터** 열린다
+    /// (이탈 사이 꺼졌을 수 있는 카메라·마이크 권한을 다시 확인하려는 것 — 시작 탭이 이 시드로 세션을 연다).
     /// raw 축 확정은 세션 진입의 startRecording 반환(에셋 실측)이 한다. TODO(#69) 해소.
     private func presentResumedInterview(
         _ state: inout State,
