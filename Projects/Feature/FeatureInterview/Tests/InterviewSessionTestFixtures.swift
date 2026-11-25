@@ -18,10 +18,9 @@ import Foundation
 // InterviewSessionFeatureTests.swift · InterviewSessionNetworkFailureTests.swift.
 
 extension DependencyValues {
-    /// 세션 시작(`recordingStarted`)이 보관값에 프로세스 표식을 찍는 실배선을 삼킨다 — 표식이 없으면
-    /// 백그라운드를 거치지 않고 죽은 면접을 킬 클린업이 잡지 못한다(2026-08-09 결함 수정).
-    /// 표식·누적초 **자체**를 검증하는 테스트는 이걸 쓰지 않고 `save` 를 직접 잡는다.
-    mutating func ignoreHeldSessionStamp() {
+    /// 세션 시작(`recordingStarted`)·턴 경계(다음 질문 응답)가 보관값에 진행 길이를 저장하는 실배선을 삼킨다.
+    /// 진행 길이 **자체**를 검증하는 테스트는 이걸 쓰지 않고 `save` 를 직접 잡는다.
+    mutating func ignoreHeldSessionSave() {
         heldSessionStore.save = { _ in }
     }
 }

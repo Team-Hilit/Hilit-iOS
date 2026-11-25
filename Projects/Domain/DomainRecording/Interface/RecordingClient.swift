@@ -64,7 +64,12 @@ public struct RecordingClient: Sendable {
     /// 녹화 시작 — 새 «세그먼트» 를 연다(재개 경계마다 파일이 갈라진다 — 스펙 ①). 파일 기록이 실제로
     /// 구른 뒤(didStartRecordingTo) 반환하며, 반환값은 **이전까지 누적 녹화초**(첫 세그먼트 0) —
     /// 호출부가 세션 시계 시드로 삼는다.
-    public var startRecording: @Sendable (_ sessionId: Int) async throws -> Double
+    ///
+    /// `resumingAtSeconds` 는 **재개 지점** — 처음 시작이면 nil, 재개면 held 가 기억하는 진행 길이(초)다.
+    /// 원장이 그 지점을 이어받을 수 없으면(앱이 죽어 세그먼트 원장이 사라진 경우) 새 녹화를 열지 않고
+    /// `startFailed` 로 던진다 — 호출부는 영상 없이 진행한다(스펙 §⑥). 던지지 않고 열면 앞부분 없는 영상에
+    /// 시계만 0 으로 돌아가 서버 마킹과 어긋난다.
+    public var startRecording: @Sendable (_ sessionId: Int, _ resumingAtSeconds: Int?) async throws -> Double
     /// 현 세그먼트 마감(스펙 ②) — 백그라운드 진입 시 파일을 닫고 세션오디오 쌍과 함께 원장에 올린다.
     /// 반환은 누적 녹화초(진행 중 녹화가 없으면 nil) — held 갱신 재료. 비던짐(실패는 세그먼트 유실 + 로그).
     public var suspendRecording: @Sendable (_ audio: RecordingAudioSegment?) async -> Double?
@@ -73,14 +78,15 @@ public struct RecordingClient: Sendable {
     public var stopRecording: @Sendable (_ finalAudio: RecordingAudioSegment?) async throws -> RecordingRef
     /// 녹화 폐기 — 진행 중이면 정지 후 그 세션 세그먼트 전부 삭제(멱등·비던짐). 이탈·실패 공통 정리.
     public var discardRecording: @Sendable () async -> Void
-    /// 그 세션의 잔존 파일(세그먼트·합성본) 제거 — 킬 클린업 전용(스펙 ④). 현재 진행 중인 세션이면 무시
+    /// 그 세션의 잔존 파일(세그먼트·합성본) 제거 — 앱이 죽어 원장 없이 남은 파일 전용(스펙 ④): 서버가 끝낸 세션의
+    /// 보관값을 걷을 때와 이어받지 못할 재개 지점에서 부른다. 현재 진행 중인 세션이면 무시
     /// — 전체 삭제로 하면 클린업과 새 세션의 세그먼트 0 이 레이스로 함께 지워질 수 있다.
     public var purgeRecordings: @Sendable (_ sessionId: Int) async -> Void
 
     public init(
         startPreview: @escaping @Sendable () async -> CameraPreviewHandle?,
         stopPreview: @escaping @Sendable () async -> Void,
-        startRecording: @escaping @Sendable (_ sessionId: Int) async throws -> Double,
+        startRecording: @escaping @Sendable (_ sessionId: Int, _ resumingAtSeconds: Int?) async throws -> Double,
         suspendRecording: @escaping @Sendable (_ audio: RecordingAudioSegment?) async -> Double?,
         stopRecording: @escaping @Sendable (_ finalAudio: RecordingAudioSegment?) async throws -> RecordingRef,
         discardRecording: @escaping @Sendable () async -> Void,
@@ -115,7 +121,7 @@ extension RecordingClient: TestDependencyKey {
         RecordingClient(
             startPreview: { nil },
             stopPreview: {},
-            startRecording: { _ in 0 },
+            startRecording: { _, _ in 0 },
             suspendRecording: { _ in nil },
             stopRecording: { _ in
                 RecordingRef(sessionId: 0, fileURL: URL(fileURLWithPath: "/dev/null"), durationSeconds: 0)

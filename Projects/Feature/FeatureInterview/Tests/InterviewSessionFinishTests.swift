@@ -47,10 +47,10 @@ struct InterviewSessionFinishTests {
         let store = TestStore(initialState: .fixture()) {
             InterviewSessionFeature()
         } withDependencies: {
-            $0.ignoreHeldSessionStamp()
+            $0.ignoreHeldSessionSave()
             $0.continuousClock = TestClock()
             $0.recordingClient.startPreview = { nil }
-            $0.recordingClient.startRecording = { _ in 0 }
+            $0.recordingClient.startRecording = { _, _ in 0 }
             $0.recordingClient.stopRecording = { _ in .stub }
             // 스스로 끝나지 않는 캡처 스트림 — 종료는 effect 취소뿐이라 onTermination 이 곧 stopCapture 시점이다.
             $0.speechClient.startCapture = {
@@ -98,7 +98,7 @@ struct InterviewSessionFinishTests {
         let store = TestStore(initialState: initialState) {
             InterviewSessionFeature()
         } withDependencies: {
-            $0.ignoreHeldSessionStamp()
+            $0.ignoreHeldSessionSave()
             $0.speechClient.finishSessionAudioRecording = {
                 calls.continuation.yield("sessionAudioFinished")
                 return .stub
@@ -131,7 +131,7 @@ struct InterviewSessionFinishTests {
         let store = TestStore(initialState: initialState) {
             InterviewSessionFeature()
         } withDependencies: {
-            $0.ignoreHeldSessionStamp()
+            $0.ignoreHeldSessionSave()
             $0.recordingClient.stopRecording = { _ in ref }
             $0.speechClient.answerAudio = { nil }
             $0.speechClient.finishSessionAudioRecording = { .stub }

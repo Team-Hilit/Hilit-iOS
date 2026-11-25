@@ -175,12 +175,7 @@ struct HomeHeldSessionTests {
         let boundaries = [(179, 1), (180, 2), (299, 2), (300, 3), (420, 3), (421, 4)]
         for (remainingSeconds, expected) in boundaries {
             // 보관값은 «녹화된 초» 라 최대 길이 8분(480초)에서 남기려는 시간을 뺀다.
-            // 여기서 보는 건 환산 구간이라 진행분이 살아 있어야 한다 — 토큰을 찍어 카드까지 도달시킨다.
-            let held = HeldSession(
-                sessionId: 7,
-                recordedSeconds: 480 - remainingSeconds,
-                processToken: HeldSession.currentProcessToken
-            )
+            let held = HeldSession(sessionId: 7, recordedSeconds: 480 - remainingSeconds)
             let store = Self.store(held: held)
 
             await store.send(.view(.onAppear))
@@ -200,37 +195,24 @@ struct HomeHeldSessionTests {
         #expect(store.state.startInterview.variant == .exhausted)
     }
 
-    @Test("죽은 프로세스의 진행분 보관값은 카드가 되지 않는다 — 없는 것처럼 first 로 떨어진다")
-    func deadHeldSessionIsIgnored() async {
-        // 지난 실행이 남긴 진행분 — 세그먼트 파일(tmp·프로세스 수명)이 사라져 이어 붙일 앞부분이 없다.
-        let store = Self.store(
-            held: HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID()),
-            remaining: 3
-        )
+    // 재개 가능 여부는 서버가 정한다(실행·복귀 시점 `checkResume` — [[interview#Client 계약]]). 홈은 보관값이 있으면
+    // 프로세스를 가리지 않고 카드를 그린다 — 앱이 죽었다 살아나도 UserDefaults 의 sessionId 가 카드를 잇는다.
+    // (예전엔 죽은 프로세스의 진행분 보관값을 «없는 것처럼» 걸러 first 로 떨어뜨렸다 — 세그먼트 원장이 프로세스 수명이라서였다.)
+    @Test("진행분 보관값은 프로세스를 가리지 않고 카드가 된다 — 앱이 죽었다 살아나도 이어진다")
+    func progressedHeldBecomesCard() async {
+        let store = Self.store(held: HeldSession(sessionId: 1, recordedSeconds: 60), remaining: 3)
 
         await store.send(.view(.onAppear))
-        #expect(store.state.startInterview.variant == .first)
+        // 480−60=420초 → 7분 이하 → 3개.
+        #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 3))
         await store.receive(\.inner.entryLoaded)
-        #expect(store.state.startInterview.variant == .first)
+        #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 3))
     }
 
-    @Test("죽은 진행분이 소진 판정을 가리지 않는다 — 잔여 0 이면 소진이다")
-    func deadHeldSessionDoesNotMaskExhausted() async {
-        // 걸러 낸 자리는 «보관값이 없는» 자리와 같아야 한다 — 잔여 판정이 그대로 이어진다.
+    @Test("0초 보관값(시작 직후)도 카드가 된다")
+    func zeroProgressHeldBecomesCard() async {
         let store = Self.store(
-            held: HeldSession(sessionId: 1, recordedSeconds: 60, processToken: UUID()),
-            remaining: 0
-        )
-
-        await store.send(.view(.onAppear))
-        await store.receive(\.inner.entryLoaded)
-        #expect(store.state.startInterview.variant == .exhausted)
-    }
-
-    @Test("0초 보관값(시작 직후)은 프로세스를 넘어 카드가 된다 — 잃을 영상이 없다")
-    func zeroProgressHeldSurvivesRelaunch() async {
-        let store = Self.store(
-            held: HeldSession(sessionId: 1, recordedSeconds: 0, processToken: nil),
+            held: HeldSession(sessionId: 1, recordedSeconds: 0),
             remaining: 3
         )
 
@@ -244,7 +226,7 @@ struct HomeHeldSessionTests {
     // [시작하기] 를 누르지 않았어도 카드를 그려야 사용자가 그 이용권을 회수한다(#130 이 숨겼던 자리).
     @Test("시작 전 장부도 카드가 된다 — 잡힌 이용권의 회수 동선이 그것뿐이다")
     func unstartedHeldBecomesCard() async {
-        let held = HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: false, processToken: nil)
+        let held = HeldSession(sessionId: 1, recordedSeconds: 0, hasStarted: false)
         let store = Self.store(held: held, remaining: 0)
 
         await store.send(.view(.onAppear))
@@ -252,32 +234,6 @@ struct HomeHeldSessionTests {
         #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 4))
         await store.receive(\.inner.entryLoaded)
         #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 4))
-    }
-
-    @Test("죽은 프로세스의 진행분 보관값도 카드가 되지 않는다 — 킬 클린업이 주울 몫이다")
-    func deadProcessHeldDoesNotBecomeCard() async {
-        let held = HeldSession(sessionId: 1, recordedSeconds: 320, hasStarted: true, processToken: UUID())
-        let store = Self.store(held: held, remaining: 3)
-
-        await store.send(.view(.onAppear))
-        #expect(store.state.startInterview.variant == .first)
-        await store.receive(\.inner.entryLoaded)
-        #expect(store.state.startInterview.variant == .first)
-    }
-
-    @Test("현재 프로세스의 진행분 보관값은 환산된 남은 질문 수로 카드가 된다")
-    func inProcessHeldShowsConvertedCount() async {
-        let held = HeldSession(
-            sessionId: 1,
-            recordedSeconds: 320,
-            processToken: HeldSession.currentProcessToken
-        )
-        let store = Self.store(held: held, remaining: 3)
-
-        await store.send(.view(.onAppear))
-        // 480−320=160초 → 3분 미만 → 1개.
-        #expect(store.state.startInterview.variant == .inProgress(remainingQuestionCount: 1))
-        await store.receive(\.inner.entryLoaded)
     }
 
     @Test("진행 중 두 갈래는 보관값의 세션 id 를 실어 올린다")

@@ -17,7 +17,7 @@ import Testing
 // 백그라운드 동결(스펙 ②) — 마감 순서·시계 정지·입력 잠금·held 갱신·랩업 예외를 고정한다.
 @MainActor
 struct InterviewSessionBackgroundTests {
-    @Test("백그라운드 진입은 마감→suspend(쌍)→stopCapture 순서로 동결하고 held 를 누적초+토큰으로 갱신한다")
+    @Test("백그라운드 진입은 마감→suspend(쌍)→stopCapture 순서로 동결하고 held 를 누적초로 갱신한다")
     func backgroundFreezesInOrder() async {
         var state = InterviewSessionFeature.State.fixture(hasStarted: true)
         state.hasRecording = true
@@ -49,9 +49,7 @@ struct InterviewSessionBackgroundTests {
         await store.receive(\.delegate.interrupted)
         await store.finish()
         #expect(calls.value == ["finish", "suspend(쌍)", "stopCapture"])
-        #expect(saved.value == HeldSession(
-            sessionId: state.sessionId, recordedSeconds: 46, processToken: HeldSession.currentProcessToken
-        ))
+        #expect(saved.value == HeldSession(sessionId: state.sessionId, recordedSeconds: 46))
     }
 
     @Test("동결 후엔 시계 tick 도 사용자 입력도 죽는다 — 다음 상태는 코디네이터 라우팅뿐")
@@ -74,7 +72,8 @@ struct InterviewSessionBackgroundTests {
         store.dependencies.speechClient.finishSessionAudioRecording = { nil }
         store.dependencies.recordingClient.suspendRecording = { _ in nil }
         store.dependencies.speechClient.stopCapture = {}
-        // heldSessionStore.save 미스텁 — 녹화가 없던 세션이 보관값을 건드리면 unimplemented 가 잡는다.
+        // 녹화가 없던 세션도 동결 때 진행 길이(시계 raw 축)를 남긴다 — 값 자체는 `freezeWithoutRecordingSavesClockProgress` 가 본다.
+        store.dependencies.ignoreHeldSessionSave()
 
         await store.send(.view(.sceneBackgrounded)) {
             $0.isInterrupted = true
@@ -126,10 +125,10 @@ struct InterviewSessionBackgroundTests {
         let store = TestStore(initialState: .fixture()) {
             InterviewSessionFeature()
         } withDependencies: {
-            $0.ignoreHeldSessionStamp()
+            $0.ignoreHeldSessionSave()
             $0.continuousClock = TestClock()
             $0.recordingClient.startPreview = { nil }
-            $0.recordingClient.startRecording = { _ in 0 }
+            $0.recordingClient.startRecording = { _, _ in 0 }
             $0.recordingClient.suspendRecording = { _ in nil }
             // 스스로 끝나지 않는 캡처 스트림 — 취소가 걸리면 onTermination 이 그 시점을 알린다.
             $0.speechClient.startCapture = {
@@ -189,9 +188,7 @@ struct InterviewSessionBackgroundTests {
         await store.receive(\.delegate.interrupted)
         await store.finish()
         // 재개 재료 — 누적초는 화면 경과초(100)가 아니라 세그먼트 실측(92.4→92)이다.
-        #expect(saved.value == HeldSession(
-            sessionId: initialState.sessionId, recordedSeconds: 92, processToken: HeldSession.currentProcessToken
-        ))
+        #expect(saved.value == HeldSession(sessionId: initialState.sessionId, recordedSeconds: 92))
     }
 
     // 백그라운드와 갈리는 유일한 지점 — 그쪽은 시작 전이면 화면을 지키고 복귀를 기다리지만,
@@ -200,13 +197,14 @@ struct InterviewSessionBackgroundTests {
     func earlyExitBeforeStartStillLeaves() async {
         var initialState = InterviewSessionFeature.State.fixture()   // hasStarted false
         initialState.isEarlyExitWarningPresented = true
+        let saved = LockIsolated<HeldSession?>(nil)
         let store = TestStore(initialState: initialState) {
             InterviewSessionFeature()
         } withDependencies: {
             $0.speechClient.finishSessionAudioRecording = { nil }
             $0.recordingClient.suspendRecording = { _ in nil }
             $0.speechClient.stopCapture = {}
-            // heldSessionStore.save 미스텁 — 녹화가 없던 세션이 0초 보관값을 덮으면 unimplemented 가 잡는다.
+            $0.heldSessionStore.save = { saved.setValue($0) }
         }
 
         await store.send(.view(.userTappedLeaveInterview)) {
@@ -215,20 +213,20 @@ struct InterviewSessionBackgroundTests {
         }
         await store.receive(\.delegate.interrupted)
         await store.finish()
+        // 녹화가 없던 세션은 시계 raw 축(시작 전이라 0초)을 진행 길이로 남긴다 — 옛 값을 덮어도 같은 0 이다.
+        #expect(saved.value == HeldSession(sessionId: initialState.sessionId, recordedSeconds: 0))
     }
 
-    // 백그라운드를 거치지 않고 죽은 면접(크래시·메모리 압박·동결 완주 전 강제 종료)을 킬 클린업이
-    // 잡으려면 «이 프로세스에서 면접이 시작됐다» 는 표식이 **시작 시점에** 찍혀 있어야 한다. 생성 시점
-    // 보관값은 표식이 없어 갓 시작한 보관분과 구분되지 않고, 그래서 서버 세션이 영영 살아남았다
-    // (2026-08-09 결함 수정 — 판정 자체는 `HeldSessionTests`·`HeldSessionCleanupTests`).
-    @Test("면접 시작이 보관값에 프로세스 표식을 찍는다 — 백그라운드 없이 죽어도 정리 대상이 된다")
-    func recordingStartStampsProcessToken() async {
+    // 면접이 시작되면 보관값에 진행 길이가 남아야 한다 — 백그라운드를 거치지 않고 죽어도(크래시·메모리 압박) 재개가
+    // 그 값을 시계 시드와 `startRecording` 의 이어받을 지점으로 쓴다. 재개 판정 자체는 서버(`resumeState`) 몫이다.
+    @Test("면접 시작은 보관값에 진행 길이를 최신으로 남긴다 — 녹화 시작 성공이면 에셋 실측 누적초")
+    func recordingStartSavesProgressLength() async {
         let saved = LockIsolated<HeldSession?>(nil)
         let store = TestStore(initialState: .fixture()) { InterviewSessionFeature() }
         store.exhaustivity = .off
         store.dependencies.continuousClock = TestClock()   // 시작이 세션 시계를 연다 — 틱은 다른 테스트가 본다
         store.dependencies.recordingClient.startPreview = { nil }
-        store.dependencies.recordingClient.startRecording = { _ in 0 }
+        store.dependencies.recordingClient.startRecording = { _, _ in 0 }
         store.dependencies.heldSessionStore.save = { saved.setValue($0) }
         store.dependencies.speechClient.startCapture = { AsyncStream { $0.finish() } }
         store.dependencies.speechClient.startSessionAudioRecording = {}
@@ -239,8 +237,7 @@ struct InterviewSessionBackgroundTests {
 
         await store.send(.view(.onAppear))
         await store.receive(\.inner.recordingStarted)
-        #expect(saved.value?.processToken == HeldSession.currentProcessToken)
-        #expect(saved.value?.isResumableInCurrentProcess == true)   // 이 프로세스에선 여전히 재개 대상
+        #expect(saved.value == HeldSession(sessionId: 7, recordedSeconds: 0))
     }
 
     @Test("동결 후 도착한 늦은 제출 응답은 무시된다 — 취소와 도착의 레이스를 상태로 닫는다")
@@ -279,8 +276,8 @@ struct InterviewSessionResumeSeedTests {
         store.exhaustivity = .off
         store.dependencies.continuousClock = clock
         store.dependencies.recordingClient.startPreview = { nil }
-        store.dependencies.recordingClient.startRecording = { _ in 60.4 }
-        store.dependencies.ignoreHeldSessionStamp()
+        store.dependencies.recordingClient.startRecording = { _, _ in 60.4 }
+        store.dependencies.ignoreHeldSessionSave()
         store.dependencies.interviewClient.questionAudioStream = { _, _ in
             streamRequested.continuation.yield(())
             return InterviewAudioStream(url: URL(string: "https://example.com/tts")!, headers: [:])
@@ -311,8 +308,8 @@ struct InterviewSessionResumeSeedTests {
         store.exhaustivity = .off
         store.dependencies.continuousClock = TestClock()
         store.dependencies.recordingClient.startPreview = { nil }
-        store.dependencies.recordingClient.startRecording = { _ in 63.6 }
-        store.dependencies.ignoreHeldSessionStamp()
+        store.dependencies.recordingClient.startRecording = { _, _ in 63.6 }
+        store.dependencies.ignoreHeldSessionSave()
         store.dependencies.interviewClient.questionAudioStream = { stubAudioStream($0, $1) }
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
@@ -344,8 +341,8 @@ struct InterviewSessionResumeSeedTests {
         store.exhaustivity = .off
         store.dependencies.continuousClock = TestClock()
         store.dependencies.recordingClient.startPreview = { nil }
-        store.dependencies.recordingClient.startRecording = { _ in 500.0 }
-        store.dependencies.ignoreHeldSessionStamp()
+        store.dependencies.recordingClient.startRecording = { _, _ in 500.0 }
+        store.dependencies.ignoreHeldSessionSave()
         store.dependencies.interviewClient.questionAudioStream = { stubAudioStream($0, $1) }
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
@@ -359,16 +356,20 @@ struct InterviewSessionResumeSeedTests {
         #expect(store.state.toast == nil)       // 재개엔 해금 안내를 다시 띄우지 않는다
     }
 
-    @Test("재개 진입에서 녹화 시작이 실패해도 근사 시드를 지킨다 — 0 으로 리셋하지 않는다")
+    // 앱이 죽었다 살아난 재개는 세그먼트 원장이 비어 `startRecording` 이 이어받기를 거절한다 — 서버가 RESUMABLE 이라
+    // 면접은 잇되 영상은 포기하고, 시계 시드와 보관값의 진행 길이는 지킨다. 보관값을 0 으로 덮으면 다음 재개의
+    // 시계 시드가 0 이 되어 8분·12분 상한이 리셋된다.
+    @Test("재개 진입에서 녹화 시작이 거절돼도 근사 시드를 지킨다 — 시계도 보관값도 0 으로 리셋하지 않는다")
     func resumeKeepsApproximateSeedOnRecordingFailure() async {
+        let saved = LockIsolated<HeldSession?>(nil)
         let store = TestStore(
             initialState: InterviewSessionFeature.State(sessionId: 1, resume: Self.resumeSeed(elapsed: 60))
         ) { InterviewSessionFeature() }
         store.exhaustivity = .off
         store.dependencies.continuousClock = TestClock()
         store.dependencies.recordingClient.startPreview = { nil }
-        store.dependencies.recordingClient.startRecording = { _ in throw RecordingError.startFailed("테스트") }
-        store.dependencies.ignoreHeldSessionStamp()
+        store.dependencies.recordingClient.startRecording = { _, _ in throw RecordingError.startFailed("테스트") }
+        store.dependencies.heldSessionStore.save = { saved.setValue($0) }
         store.dependencies.interviewClient.questionAudioStream = { stubAudioStream($0, $1) }
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
@@ -379,5 +380,6 @@ struct InterviewSessionResumeSeedTests {
         await store.receive(\.inner.recordingStarted)
         #expect(store.state.elapsedSeconds == 60)
         #expect(!store.state.hasRecording)
+        #expect(saved.value == HeldSession(sessionId: 1, recordedSeconds: 60))
     }
 }

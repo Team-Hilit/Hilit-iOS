@@ -118,9 +118,12 @@ public struct InterviewFeature {
         Reduce { state, action in
             switch action {
             case .screen(.readiness(.delegate(.startRequested))):
-                guard case let .readiness(readiness) = state.screen else { return .none }
+                // 이탈이 확정된 뒤의 시작 탭은 무시한다 — 재개 준비 화면 뒤로가기(`leaveForResumeAtHome`)·ENDED 복귀
+                // 정리가 도는 동안에도 시작 버튼은 눌린다. 뚫리면 장치를 놓는 중에 세션이 열리고, 뒤따르는
+                // `.interrupted` 는 아래 `!isClosing` 가드에 버려져 cover 가 안 닫힌 채 장치만 꺼진 세션이 남는다.
+                guard case let .readiness(readiness) = state.screen, !state.isClosing else { return .none }
                 // 재개 — 질문·누적초는 홈이 `confirmResume` 으로 받아 둔 시드다. 장부는 이미 «시작됨» 이고 누적초도
-                // 들고 있어 건드리지 않는다(통째로 다시 쓰면 회수 판정 재료가 흔들린다) — 표식은 세션이 녹화를 열 때 찍는다.
+                // 들고 있어 건드리지 않는다(세션 화면이 녹화를 열 때 진행 길이를 최신으로 맞춘다).
                 // 핸들은 일반 진입과 같은 이유로 시드한다(첫 프레임부터 프리뷰가 붙는다).
                 if let seed = state.resumeSeed {
                     state.screen = .session(InterviewSessionFeature.State(
@@ -136,8 +139,8 @@ public struct InterviewFeature {
                 guard case let .ready(summaryQuestion) = readiness.questionPrep else { return .none }
                 // 장부는 이미 온보딩 완주 때 열렸다(2026-08-21) — 여기서 하는 일은 **«시작했다» 로
                 // 올리는 것**뿐이다. 이 플래그가 [이어서 진행] 의 목적지(시작 전이면 준비 화면, 시작 후면 세션)를 가른다.
-                // 표식은 세션 화면이 녹화를 열 때 찍고, 누적초는 백그라운드 마감마다 갱신한다
-                // ([[interview#세션]] 동결 경로).
+                // 진행 길이는 세션 화면이 녹화를 열 때·다음 질문이 열리는 턴 경계·백그라운드 마감마다
+                // 갱신한다([[interview#세션]] 동결 경로).
                 //
                 // 장부가 없으면(비정상) 새로 연다: 시작한 세션이
                 // 장부에 없는 채로 두면 회수도 재개도 못 하는 고아가 된다.

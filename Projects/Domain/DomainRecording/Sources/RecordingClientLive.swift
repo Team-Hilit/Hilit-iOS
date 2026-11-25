@@ -19,7 +19,7 @@ extension RecordingClient: @retroactive DependencyKey {
         return RecordingClient(
             startPreview: { await manager.startPreview() },
             stopPreview: { await manager.stopPreview() },
-            startRecording: { try await manager.startRecording(sessionId: $0) },
+            startRecording: { try await manager.startRecording(sessionId: $0, resumingAtSeconds: $1) },
             suspendRecording: { await manager.suspendRecording(audio: $0) },
             stopRecording: { try await manager.stopRecording(finalAudio: $0) },
             discardRecording: { await manager.discardRecording() },
@@ -90,12 +90,21 @@ actor CameraSessionManager {
 
     /// A안-2(스펙 §①) — 프리뷰 세션에 **비디오 전용** 무비 출력을 더해 «세그먼트» 를 기록한다(마이크는 엔진 소유 — 넣지 않는다).
     /// didStartRecordingTo 후 반환 — 반환값은 이전까지 누적 녹화초로, 호출부가 세션 시계 시드로 삼는다(타임라인 정렬).
-    func startRecording(sessionId: Int) async throws -> Double {
+    func startRecording(sessionId: Int, resumingAtSeconds: Int?) async throws -> Double {
         // 멱등 — `recording` 세팅은 아래 await 뒤라, 플래그로 시작 «구간» 까지 가드를 넓힌다.
         // (넓히지 않으면 동시 호출이 둘 다 통과해 무비 출력 두 개가 같은 파일에 기록된다.)
         // 마감 «구간»(isSuspending)도 막는다 — 그때 시작하면 아직 원장에 오르지 않은 세그먼트와 같은 인덱스
         // 경로를 받아 마감 중인 파일을 지운다. background→foreground 왕복이 정상 흐름이라 실제로 겹친다.
         guard recording == nil, !isStarting, !isSuspending else { return ledger.cumulativeSeconds }
+        // 재개 지점을 원장이 이어받지 못하면 — 앱이 죽어 원장이 사라진 것 — 새 녹화를 열지 않는다. 열면 `begin` 이
+        // 인덱스 0 경로를 받아 남은 첫 세그먼트를 지우고(아래 removeItem) 시계는 0 으로 돌아가 서버 마킹과 어긋난다.
+        // 서버가 RESUMABLE 이라 면접은 잇되(스펙 ④) 영상은 포기한다 — 이어받지 못할 잔존 세그먼트는 이 자리에서 걷는다.
+        // 원장이 그 세션을 들고 있으면 `purgeRecordings` 가 무시한다(누적초만 어긋난 경우 — 지금 파일을 건드리지 않는다).
+        if let seconds = resumingAtSeconds, !ledger.canContinue(sessionId: sessionId, fromSeconds: seconds) {
+            Self.logger.notice("재개 지점을 이어받을 원장 없음 — 영상 없이 진행: session \(sessionId), \(seconds)s")
+            purgeRecordings(sessionId: sessionId)
+            throw RecordingError.startFailed("재개 지점을 이어받을 원장 없음")
+        }
         isStarting = true
         defer {
             isStarting = false
@@ -297,7 +306,9 @@ actor CameraSessionManager {
         ledger.reset()
     }
 
-    /// 킬 클린업 전용(스펙 ④) — 그 세션의 잔존 파일을 tmp 에서 걷어낸다. 현재 원장의 세션이면 무시.
+    /// 죽은 프로세스의 잔존 파일 정리(스펙 ④) — 그 세션의 세그먼트·합성본을 tmp 에서 걷어낸다.
+    /// 서버가 끝낸 세션의 보관값을 걷을 때와, 이어받지 못할 재개 지점(`startRecording` 가드)에서 부른다.
+    /// 현재 원장의 세션이면 무시.
     func purgeRecordings(sessionId: Int) {
         guard sessionId != ledger.sessionId else { return }
         let tmp = FileManager.default.temporaryDirectory
