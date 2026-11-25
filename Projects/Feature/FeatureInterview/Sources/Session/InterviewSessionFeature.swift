@@ -93,7 +93,7 @@ public struct InterviewSessionFeature {
         /// 답변 제출·질문 스트림의 경로 파라미터 — 준비 화면과 같은 세션이다.
         public let sessionId: Int
         /// READY 폴링이 동봉한 요약 질문 — 첫 asking 재생(base64 mp3)에 쓴다.
-        /// 재개 진입은 readiness 를 건너뛰어 요약 질문 자체가 없다(nil) — 첫 재생부터 스트림이다.
+        /// 재개 진입은 질문 준비 폴링 없이 confirmResume 의 질문으로 시작해 요약 질문 자체가 없다(nil) — 첫 재생부터 스트림이다.
         public let summaryQuestion: SummaryQuestion?
 
         public var phase: Phase = .asking
@@ -119,6 +119,13 @@ public struct InterviewSessionFeature {
         public var questionAudioStartedAt: Int?
         public var questionAudioEndedAt: Int?
         public var answerStartedAt: Int?
+        /// 이번 답변 턴에서 사용자 발화가 감지됐다(진폭 8% 이상 연속 2버퍼 — [[interview#음성 캡처]]) —
+        /// «답변 완료하기» 노출 조건. 답변 진입(`questionPlaybackFinished`)마다 리셋하고, 침묵이 와도 되돌리지 않는다
+        /// (말을 마친 사용자는 침묵 상태에서 버튼을 눌러야 한다).
+        public var hasDetectedSpeech = false
+        /// 마이크 캡처 시작 실패(권한 거부·세션 구성 실패 등) — 발화를 감지할 수 없으니 «답변 완료하기» 를
+        /// 상시 노출로 돌린다(버튼이 영영 안 나와 갇히는 것을 막는 폴백). 세션 수명 동안 유지한다.
+        public var isMicCaptureFailed = false
         /// 중복 제출 가드 (ANSWER_ALREADY_SUBMITTED 예방).
         public var isSubmitting = false
         /// 질문 재생 실패 1회 재시도 가드 — 질문이 바뀌면 리셋.
@@ -156,6 +163,10 @@ public struct InterviewSessionFeature {
 
         /// 면접 로직·표시용 유효시간 — 해금·상한·랩업·시간 칩이 이 값을 쓴다. 시간 마킹은 raw(영상 축).
         public var effectiveElapsedSeconds: Int { elapsedSeconds - suspendedSeconds }
+
+        /// «답변 완료하기» 를 보여도 되는가 — 발화가 감지됐거나, 마이크가 죽어 감지 자체가 불가능할 때.
+        /// phase(answering) 조건은 View 가 따로 건다.
+        public var canCompleteAnswer: Bool { hasDetectedSpeech || isMicCaptureFailed }
 
         /// 최종 카운트다운 잔여 초 — 상한까지 남은 시간.
         public var countdownRemaining: Int {
@@ -230,6 +241,10 @@ public struct InterviewSessionFeature {
             case questionPlaybackFinished
             /// 질문 TTS 재생 실패 — 같은 질문 1회 재시도(TTS 재생성) 후 네트워크 실패 처리.
             case questionPlaybackFailed
+            /// 답변 구간 발화 감지(`SpeechCaptureEvent.speechStarted`) — «답변 완료하기» 노출 조건.
+            case speechDetected
+            /// 마이크 캡처 시작 실패(`SpeechCaptureEvent.captureFailed`) — 발화 감지가 불가능하니 버튼을 상시 노출로 돌린다.
+            case micCaptureFailed
             /// 8분 해금 토스트 유지 시간 경과.
             case exitNoticeExpired
             /// 답변 제출 성공 — 다음 질문 재생 또는 세션 종료(endType) 분기.
@@ -322,9 +337,9 @@ extension InterviewSessionFeature {
             guard !state.hasStarted else { return .none }
             state.hasStarted = true
             let sessionId = state.sessionId
-            // 프리뷰 확보 → 녹화 시작 순서를 한 effect 로 잇는다 — 재개 직행(readiness 생략)은 프리뷰가
-            // 아직 없어서 병렬이면 startRecording 이 «프리뷰 세션 없음» 으로 죽는다. startPreview 는
-            // 멱등이라 일반 진입(핸들 보유)에선 즉시 반환된다.
+            // 프리뷰 확보 → 녹화 시작 순서를 한 effect 로 잇는다 — 준비 화면이 프리뷰를 못 열고 넘어온 경우
+            // (장치 실패 등 — 시작 게이트는 프리뷰를 보지 않는다)엔 프리뷰가 아직 없어서 병렬이면 startRecording 이
+            // «프리뷰 세션 없음» 으로 죽는다. startPreview 는 멱등이라 핸들이 있으면 즉시 반환된다.
             // 타임라인 정렬(스펙 §①): 녹화 시작 완료 → 세션 시계 시드 → 첫 질문. 시계·재생은 recordingStarted 가 연다.
             return .run { send in
                 await send(.inner(.previewStarted(recordingClient.startPreview())))
@@ -411,6 +426,7 @@ extension InterviewSessionFeature {
         case .questionPlaybackFinished:
             guard state.phase == .asking else { return .none }
             state.phase = .answering
+            state.hasDetectedSpeech = false   // 질문마다 처음부터 — 버튼은 이번 턴 발화가 잡혀야 나온다
             state.questionAudioEndedAt = state.elapsedSeconds
             state.answerStartedAt = state.elapsedSeconds
             // AI 발화가 끝났으니 세션 오디오를 되살린 뒤(무음 해제) 답변 구간 m4a 기록을 연다
@@ -428,6 +444,16 @@ extension InterviewSessionFeature {
             // 같은 questionId 재호출 = 서버가 TTS 를 처음부터 재생성한다([[api#Interview]] 스트리밍 규약).
             state.hasRetriedPlayback = true
             return playCurrentQuestion(state)
+
+        case .speechDetected:
+            // 감지기는 답변 구간에만 열려 있지만, 닫힘 직후 도착한 잔광(제출·상한 전환 뒤)은 여기서 한 번 더 거른다.
+            guard state.phase == .answering else { return .none }
+            state.hasDetectedSpeech = true
+            return .none
+
+        case .micCaptureFailed:
+            state.isMicCaptureFailed = true
+            return .none
 
         case .exitNoticeExpired:
             guard state.toast == .exitUnlocked else { return .none }
@@ -565,8 +591,8 @@ extension InterviewSessionFeature {
             }
             .cancellable(id: CancelID.clock),
             // 세션 오디오는 녹화 성공 시에만 — 합성 입력이 없으면 어차피 포기 경로(스펙 §⑥).
-            // 캡처 구독과 같은 effect 로 묶어 «엔진 먼저» 순서를 보장한다(micCaptureLogging 주석 참조).
-            micCaptureLogging(startsSessionAudio: success),
+            // 캡처 구독과 같은 effect 로 묶어 «엔진 먼저» 순서를 보장한다(observeMicCapture 주석 참조).
+            observeMicCapture(startsSessionAudio: success),
             playCurrentQuestion(state)
         )
     }
@@ -858,7 +884,8 @@ extension InterviewSessionFeature {
         return try await interviewClient.submitAnswer(sessionId, submission)
     }
 
-    /// 마이크 캡처 검증 로그 — 세션 전구간 구독(State 무변화). STT 도입 시 이벤트를 inner 로 승격한다.
+    /// 마이크 캡처 구독 — 세션 전구간. 발화 시작(`speechStarted`)·캡처 실패는 inner 로 올려 «답변 완료하기»
+    /// 노출을 결정하고, 나머지(레벨·발화 종료)는 로그만 남긴다. 침묵 10초 확정을 도입할 때 `speechEnded` 를 승격한다.
     /// 정지는 코디네이터 stopCaptureDevices + 취소 양쪽.
     ///
     /// `startsSessionAudio` 를 별도 effect 로 떼지 않는 이유: `startSessionAudioRecording` 은 캡처 엔진이
@@ -866,8 +893,8 @@ extension InterviewSessionFeature {
     /// merge 로 두면 두 Task 의 순서가 미보장이라 세션 오디오가 먼저 도착하는 순간 항상 무기록이 되고,
     /// finish 가 nil → stopRecording throw → 모든 세션이 영상 없는 리포트로 수렴한다.
     /// `startCapture()` 반환 시점엔 엔진 시작이 끝나 있으므로 같은 effect 안에서 이어 부른다.
-    private func micCaptureLogging(startsSessionAudio: Bool) -> Effect<Action> {
-        .run { _ in
+    private func observeMicCapture(startsSessionAudio: Bool) -> Effect<Action> {
+        .run { send in
             let events = await speechClient.startCapture()
             if startsSessionAudio {
                 await speechClient.startSessionAudioRecording()
@@ -878,10 +905,12 @@ extension InterviewSessionFeature {
                     Self.micLogger.info("입력 레벨 \(decibels, format: .fixed(precision: 1), align: .right(columns: 6)) dBFS")
                 case .speechStarted:
                     Self.micLogger.notice("음성 감지 시작")
+                    await send(.inner(.speechDetected))
                 case .speechEnded:
                     Self.micLogger.notice("음성 감지 종료")
                 case let .captureFailed(reason):
                     Self.micLogger.error("마이크 캡처 시작 실패: \(reason)")
+                    await send(.inner(.micCaptureFailed))
                 }
             }
         }

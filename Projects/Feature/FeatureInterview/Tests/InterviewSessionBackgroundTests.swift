@@ -256,8 +256,8 @@ struct InterviewSessionBackgroundTests {
     }
 }
 
-// 재개 시드(스펙 ③④) — 동결의 반대쪽 반. readiness 를 생략하고 confirmResume 의 최신 질문·누적초로
-// 세션에 직행할 때, 시계 이어가기·질문 출처(스트림)·해금 보완·시작 실패 폴백을 고정한다.
+// 재개 시드(스펙 ③④) — 동결의 반대쪽 반. 준비 화면의 시작 탭이 confirmResume 의 최신 질문·누적초로
+// 세션을 열 때, 시계 이어가기·질문 출처(스트림)·해금 보완·시작 실패 폴백을 고정한다.
 @MainActor
 struct InterviewSessionResumeSeedTests {
     /// 재개 진입 시드 — 최신 턴 질문(confirmResume)과 표시용 근사 누적초(held).
@@ -372,7 +372,7 @@ struct InterviewSessionResumeSeedTests {
         store.dependencies.interviewClient.questionAudioStream = { stubAudioStream($0, $1) }
         store.dependencies.speechClient.setSessionAudioMuted = { _ in }
         store.dependencies.speechClient.playStream = { _, _ in AsyncStream { $0.finish() } }
-        // 녹화 실패여도 캡처 구독(micCaptureLogging)은 돈다 — startSessionAudioRecording 만 꺼진다(미스텁이 감시).
+        // 녹화 실패여도 캡처 구독(observeMicCapture)은 돈다 — startSessionAudioRecording 만 꺼진다(미스텁이 감시).
         store.dependencies.speechClient.startCapture = { AsyncStream { $0.finish() } }
 
         await store.send(.view(.onAppear))

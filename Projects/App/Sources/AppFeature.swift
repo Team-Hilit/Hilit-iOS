@@ -103,7 +103,7 @@ struct AppFeature {
         /// 보관값까지 지운 뒤라 남은 일은 새 면접을 시작하는 것뿐이다.
         case interviewAbandonResolved
         /// 재개 확정 완료 — 이 세션으로 면접 화면을 연다. 최신 질문은 확정 응답이 실어 준 것 그대로다
-        /// (재개 진입은 readiness 를 생략해 질문을 다시 물을 자리가 없다).
+        /// (재개 진입도 준비 화면부터 열지만 질문 준비 폴링은 건너뛴다 — 질문을 다시 물을 자리가 없다).
         case interviewResumeResolved(sessionId: Int, question: NextQuestion)
         /// **시작 전** 세션의 [이어서 진행] — 준비 화면부터 다시 태운다. 재개 확정(`confirmResume`)을
         /// 거치지 않는다: 아직 아무 질문도 오가지 않아 «이어서 물을 것» 이 없고, 사용자는 카메라 확인·
